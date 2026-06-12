@@ -1,7 +1,11 @@
 {
   "name": "bjd-wins",
-  "version": "1.2.2",
+  "version": "1.0.0",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/QCMaxcer/BJD-Streaks.git"
+  },
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
