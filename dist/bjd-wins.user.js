@@ -1,4 +1,5 @@
 // ==UserScript==
+// @license MIT
 // @name         布吉岛战绩与连胜统计
 // @namespace    https://user.mcbjd.net/
 // @version      1.0.0
