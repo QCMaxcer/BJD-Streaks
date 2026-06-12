@@ -3,7 +3,7 @@
 // @namespace    https://user.mcbjd.net/
 // @version      1.0.0
 // @description  分类查找布吉岛战绩，并统计当前连胜与历史最高连胜
-// @author       Codex
+// @author       QC_Max
 // @match        https://user.mcbjd.net/*
 // @grant        none
 // @run-at       document-idle
