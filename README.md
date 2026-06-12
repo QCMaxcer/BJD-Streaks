@@ -2,6 +2,19 @@
 
 用于 `https://user.mcbjd.net/#/stats` 的 Tampermonkey 用户脚本。脚本复用页面当前登录态，分页获取全部战绩，并按精确游戏模式统计当前连胜和历史最高连胜。
 
+## 安装
+
+1. 安装油猴扩展。
+   - Chrome / Edge 推荐安装 [Tampermonkey](https://www.tampermonkey.net/)。
+   - Firefox 也可以使用 Tampermonkey 或 Violentmonkey。
+2. 打开脚本发布页：[布吉岛战绩与连胜统计 - Greasy Fork](https://greasyfork.org/zh-CN/scripts/582401-%E5%B8%83%E5%90%89%E5%B2%9B%E6%88%98%E7%BB%A9%E4%B8%8E%E8%BF%9E%E8%83%9C%E7%BB%9F%E8%AE%A1)。
+3. 点击 Greasy Fork 页面上的“安装此脚本”。
+4. 在油猴弹出的确认页面中点击“安装”。
+5. 登录 [布吉岛用户中心](https://user.mcbjd.net/#/stats)，进入“战绩”页面。
+6. 页面右侧会出现“连胜统计”入口，打开后选择账号、截止日期和分页间隔，再点击“抓取至截止日期”。
+
+如果 Greasy Fork 无法访问，也可以下载本仓库的 `dist/bjd-wins.user.js`，在 Tampermonkey 后台中新建脚本并粘贴安装。
+
 ## 开发
 
 ```powershell
