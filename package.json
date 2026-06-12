@@ -1,0 +1,14 @@
+{
+  "name": "bjd-wins",
+  "version": "1.2.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test",
+    "check": "npm run test && npm run build"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5"
+  }
+}
