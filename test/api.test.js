@@ -239,3 +239,60 @@ test("a future cutoff date stops after the first older page", async () => {
   assert.equal(result.records.length, 0);
   assert.equal(result.stoppedBy, "cutoff-date-passed");
 });
+
+test("fetchAllRecords incremental mode stops after scanning a page with known records", async () => {
+  const calls = [];
+  const progress = [];
+  const result = await fetchAllRecords({
+    uuid: "uuid",
+    pageDelayMs: 0,
+    stopWhenKnownRecord: true,
+    knownRecordKeys: ["2::2026-06-13T11:00:00"],
+    post: async (_path, body) => {
+      calls.push(body.page);
+      return {
+        code: 200,
+        data: {
+          data: {
+            data: [
+              item("1", "2026-06-13T12:00:00"),
+              item("2", "2026-06-13T11:00:00"),
+              item("3", "2026-06-13T10:00:00"),
+            ],
+          },
+        },
+      };
+    },
+    onProgress: (event) => progress.push(event),
+  });
+
+  assert.deepEqual(calls, [1]);
+  assert.deepEqual(result.records.map((entry) => entry.matchId), ["1", "3"]);
+  assert.equal(result.stoppedBy, "known-record");
+  assert.equal(result.knownRecordHits, 1);
+  assert.ok(progress.some((event) => event.phase === "received" && event.pageKnownRecordHits === 1));
+});
+
+test("fetchAllRecords incremental mode falls back to normal cutoff scanning without known records", async () => {
+  const calls = [];
+  const pages = {
+    1: { code: 200, data: { data: { data: [item("1", "2026-06-13T12:00:00")] } } },
+    2: { code: 200, data: { data: { data: [item("2", "2026-06-11T12:00:00")] } } },
+  };
+  const result = await fetchAllRecords({
+    uuid: "uuid",
+    cutoffDate: "2026-06-12",
+    pageDelayMs: 0,
+    stopWhenKnownRecord: true,
+    knownRecordKeys: [],
+    post: async (_path, body) => {
+      calls.push(body.page);
+      return pages[body.page];
+    },
+  });
+
+  assert.deepEqual(calls, [1, 2]);
+  assert.deepEqual(result.records.map((entry) => entry.matchId), ["1"]);
+  assert.equal(result.stoppedBy, "cutoff-date-passed");
+  assert.equal(result.knownRecordHits, 0);
+});

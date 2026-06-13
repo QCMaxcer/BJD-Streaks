@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BJD Streaks</title>
+    <link rel="stylesheet" href="./desktop.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>布吉岛战绩与连胜统计</h1>
+        <p class="subtitle">登录后读取当前账号绑定角色，抓取战绩并统计当前连胜与历史最高连胜。</p>
+      </div>
+      <div class="header-actions">
+        <span id="authStatus" class="auth-status">未登录</span>
+        <button id="loginButton" class="button primary" type="button">登录布吉岛</button>
+        <button id="logoutButton" class="button hidden" type="button">退出登录</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel controls">
+        <h2>抓取设置</h2>
+        <label>
+          <span>截止日期</span>
+          <input id="cutoffDate" type="date" value="2025-01-01">
+        </label>
+        <label>
+          <span>分页间隔（秒）</span>
+          <input id="pageDelay" type="number" min="0.1" max="60" step="0.1" value="0.1">
+        </label>
+        <label class="checkbox-field">
+          <input id="autoUpdate" type="checkbox" checked>
+          <span>启动后自动更新</span>
+        </label>
+        <div class="action-grid">
+          <button id="updateButton" class="button primary" type="button">更新</button>
+          <button id="refetchButton" class="button danger-outline" type="button">重新抓取</button>
+          <button id="clearCacheButton" class="button danger-outline action-wide" type="button">清空记录</button>
+          <button id="cancelButton" class="button danger action-wide hidden" type="button">取消</button>
+        </div>
+        <p id="statusText" class="status">请先登录布吉岛用户中心。</p>
+      </section>
+
+      <section class="panel workspace">
+        <section id="playerProfile" class="player-profile hidden" aria-label="玩家资料">
+          <div class="player-profile-head">
+            <div>
+              <span class="player-profile-kicker">当前游戏账号</span>
+              <h2 id="playerName">未知玩家</h2>
+            </div>
+            <span id="profileStatus" class="profile-status">资料暂不可用</span>
+          </div>
+          <div class="player-profile-grid">
+            <div class="profile-stat"><span>公会</span><strong id="profileGuild">无</strong></div>
+            <div class="profile-stat"><span>布吉岛等级</span><strong id="profileBjdLevel">0</strong></div>
+            <div class="profile-stat"><span>VIP</span><strong id="profileVipLevel">0</strong></div>
+            <div class="profile-stat"><span>空岛等级</span><strong id="profileSkywarsLevel">0</strong></div>
+            <div class="profile-stat"><span>起床等级</span><strong id="profileBedwarsLevel">0</strong></div>
+            <div class="profile-stat"><span>村守等级</span><strong id="profileVillageLevel">0</strong></div>
+          </div>
+        </section>
+
+        <div class="tab-bar" role="tablist" aria-label="功能板块">
+          <button id="streaksTab" class="tab-button active" type="button" data-tab="streaks">连胜统计</button>
+          <button id="recordsTab" class="tab-button" type="button" data-tab="records">分类查找</button>
+        </div>
+
+        <div id="streaksPanel" class="tab-panel">
+          <section class="subsection summary">
+            <div class="section-head">
+              <h2>所有模式总览</h2>
+              <button id="visualizeAllButton" class="button compact" type="button">查看所有模式可视化</button>
+            </div>
+            <div id="overallGrid" class="metric-grid"></div>
+          </section>
+
+          <section class="subsection modes">
+            <h2>精确模式连胜</h2>
+            <div id="modeList" class="mode-list"></div>
+          </section>
+        </div>
+
+        <div id="recordsPanel" class="tab-panel hidden">
+          <section class="subsection records">
+            <div class="section-head">
+              <h2>分类查找记录</h2>
+              <span id="recordCount" class="muted">暂无数据</span>
+            </div>
+            <div class="filters">
+              <select id="modeFilter" aria-label="精确模式"></select>
+              <select id="categoryFilter" aria-label="游戏大类"></select>
+              <select id="resultFilter" aria-label="胜负结果">
+                <option value="">全部结果</option>
+                <option value="win">胜利</option>
+                <option value="loss">失败</option>
+                <option value="unknown">未知结果</option>
+              </select>
+              <input id="queryFilter" type="search" placeholder="搜索 matchId / 模式">
+              <input id="fromFilter" type="date" aria-label="开始日期">
+              <input id="toFilter" type="date" aria-label="结束日期">
+            </div>
+            <div id="recordList" class="record-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="detailDialog" class="dialog hidden" role="dialog" aria-modal="true">
+      <div class="dialog-card match-dialog-card">
+        <header>
+          <strong id="detailTitle">对局详情</strong>
+          <button id="detailClose" class="icon-button" type="button" aria-label="关闭">×</button>
+        </header>
+        <div id="detailBody" class="match-detail-body"></div>
+      </div>
+    </div>
+
+    <div id="visualizationDialog" class="dialog visualization-dialog hidden" role="dialog" aria-modal="true">
+      <div class="dialog-card visualization-dialog-card">
+        <header>
+          <strong id="visualizationTitle">连胜可视化</strong>
+          <button id="visualizationClose" class="icon-button" type="button" aria-label="关闭">×</button>
+        </header>
+        <div class="visualization-body">
+          <div class="visualization-toolbar">
+            <label>
+              <span>模式</span>
+              <select id="visualizationMode"></select>
+            </label>
+            <div class="visualization-field">
+              <span>图表</span>
+              <div class="segmented-control">
+                <button id="visualizationBarsButton" class="active" type="button">每日胜负</button>
+                <button id="visualizationLineButton" type="button">累计连胜</button>
+              </div>
+            </div>
+            <label>
+              <span>时间范围</span>
+              <select id="visualizationRange">
+                <option value="30">最近 30 天</option>
+                <option value="90" selected>最近 90 天</option>
+                <option value="180">最近 180 天</option>
+                <option value="all">全部历史</option>
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+            <label>
+              <span>开始日期</span>
+              <input id="visualizationFrom" type="date">
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="visualizationTo" type="date">
+            </label>
+            <div class="visualization-field visualization-zoom-field">
+              <span>横向缩放 <strong id="visualizationZoomValue">100%</strong></span>
+              <input id="visualizationZoom" type="range" min="1" max="8" step="0.25" value="1">
+            </div>
+            <div class="visualization-actions">
+              <button id="visualizationLocateBest" class="button" type="button">定位历史最高</button>
+              <button id="visualizationExportPng" class="button" type="button">导出 PNG</button>
+              <button id="visualizationExportSvg" class="button primary" type="button">导出 SVG</button>
+            </div>
+          </div>
+          <div id="visualizationSummary" class="visualization-summary"></div>
+          <p id="visualizationNotice" class="visualization-notice"></p>
+          <div id="visualizationLegend" class="visualization-legend" aria-label="图例"></div>
+          <div id="visualizationChartScroller" class="visualization-chart-scroller">
+            <div id="visualizationChart" class="visualization-chart"></div>
+            <div id="visualizationTooltip" class="visualization-tooltip hidden"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

@@ -316,14 +316,18 @@
     rateLimitBaseDelayMs = 5e3,
     maxRateLimitRetries = 5,
     sleep = wait,
-    cutoffDate = ""
+    cutoffDate = "",
+    knownRecordKeys = [],
+    stopWhenKnownRecord = false
   }) {
     const records = [];
     const seen = /* @__PURE__ */ new Set();
+    const knownKeys = new Set(knownRecordKeys);
     let duplicatePages = 0;
     let page = 1;
     let rateLimitRetries = 0;
     let scannedCount = 0;
+    let knownRecordHits = 0;
     while (page <= maxPages) {
       if (signal?.aborted) throw new DOMException("\u64CD\u4F5C\u5DF2\u53D6\u6D88", "AbortError");
       if (page > 1 && rateLimitRetries === 0) {
@@ -363,17 +367,24 @@
           records: dedupeRecords(records),
           pagesFetched: page,
           scannedCount,
-          stoppedBy: "empty"
+          stoppedBy: "empty",
+          knownRecordHits
         };
       }
       let added = 0;
       let scannedAdded = 0;
+      let pageKnownRecordHits = 0;
       for (const record of pageRecords) {
         const key = recordKey(record);
         if (seen.has(key)) continue;
         seen.add(key);
         scannedAdded += 1;
         scannedCount += 1;
+        if (stopWhenKnownRecord && knownKeys.has(key)) {
+          pageKnownRecordHits += 1;
+          knownRecordHits += 1;
+          continue;
+        }
         const dateKey = getLocalDateKey(record?.date);
         if (cutoffDate && (!dateKey || dateKey < cutoffDate)) continue;
         records.push(record);
@@ -387,15 +398,27 @@
         scannedCount,
         pageCount: pageRecords.length,
         added,
-        scannedAdded
+        scannedAdded,
+        knownRecordHits,
+        pageKnownRecordHits
       });
+      if (stopWhenKnownRecord && pageKnownRecordHits > 0) {
+        return {
+          records: dedupeRecords(records),
+          pagesFetched: page,
+          scannedCount,
+          stoppedBy: "known-record",
+          knownRecordHits
+        };
+      }
       const pageDateKeys = pageRecords.map((record) => getLocalDateKey(record?.date)).filter(Boolean);
       if (cutoffDate && pageDateKeys.some((dateKey) => dateKey < cutoffDate)) {
         return {
           records: dedupeRecords(records),
           pagesFetched: page,
           scannedCount,
-          stoppedBy: "cutoff-date-passed"
+          stoppedBy: "cutoff-date-passed",
+          knownRecordHits
         };
       }
       if (duplicatePages >= duplicatePageLimit) {
@@ -403,7 +426,8 @@
           records: dedupeRecords(records),
           pagesFetched: page,
           scannedCount,
-          stoppedBy: "duplicates"
+          stoppedBy: "duplicates",
+          knownRecordHits
         };
       }
       page += 1;
@@ -412,7 +436,8 @@
       records: dedupeRecords(records),
       pagesFetched: maxPages,
       scannedCount,
-      stoppedBy: "limit"
+      stoppedBy: "limit",
+      knownRecordHits
     };
   }
 

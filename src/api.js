@@ -109,13 +109,17 @@ export async function fetchAllRecords({
   maxRateLimitRetries = 5,
   sleep = wait,
   cutoffDate = "",
+  knownRecordKeys = [],
+  stopWhenKnownRecord = false,
 }) {
   const records = [];
   const seen = new Set();
+  const knownKeys = new Set(knownRecordKeys);
   let duplicatePages = 0;
   let page = 1;
   let rateLimitRetries = 0;
   let scannedCount = 0;
+  let knownRecordHits = 0;
 
   while (page <= maxPages) {
     if (signal?.aborted) throw new DOMException("操作已取消", "AbortError");
@@ -159,17 +163,24 @@ export async function fetchAllRecords({
         pagesFetched: page,
         scannedCount,
         stoppedBy: "empty",
+        knownRecordHits,
       };
     }
 
     let added = 0;
     let scannedAdded = 0;
+    let pageKnownRecordHits = 0;
     for (const record of pageRecords) {
       const key = recordKey(record);
       if (seen.has(key)) continue;
       seen.add(key);
       scannedAdded += 1;
       scannedCount += 1;
+      if (stopWhenKnownRecord && knownKeys.has(key)) {
+        pageKnownRecordHits += 1;
+        knownRecordHits += 1;
+        continue;
+      }
       const dateKey = getLocalDateKey(record?.date);
       if (cutoffDate && (!dateKey || dateKey < cutoffDate)) continue;
       records.push(record);
@@ -185,7 +196,19 @@ export async function fetchAllRecords({
       pageCount: pageRecords.length,
       added,
       scannedAdded,
+      knownRecordHits,
+      pageKnownRecordHits,
     });
+
+    if (stopWhenKnownRecord && pageKnownRecordHits > 0) {
+      return {
+        records: dedupeRecords(records),
+        pagesFetched: page,
+        scannedCount,
+        stoppedBy: "known-record",
+        knownRecordHits,
+      };
+    }
 
     const pageDateKeys = pageRecords
       .map((record) => getLocalDateKey(record?.date))
@@ -196,6 +219,7 @@ export async function fetchAllRecords({
         pagesFetched: page,
         scannedCount,
         stoppedBy: "cutoff-date-passed",
+        knownRecordHits,
       };
     }
 
@@ -205,6 +229,7 @@ export async function fetchAllRecords({
         pagesFetched: page,
         scannedCount,
         stoppedBy: "duplicates",
+        knownRecordHits,
       };
     }
     page += 1;
@@ -215,5 +240,6 @@ export async function fetchAllRecords({
     pagesFetched: maxPages,
     scannedCount,
     stoppedBy: "limit",
+    knownRecordHits,
   };
 }

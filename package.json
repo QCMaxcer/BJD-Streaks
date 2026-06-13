@@ -1,7 +1,10 @@
 {
   "name": "bjd-wins",
   "version": "1.0.0",
+  "description": "布吉岛战绩分类与连胜统计工具",
+  "author": "QCMaxcer",
   "private": true,
+  "main": "src/desktop/main.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/QCMaxcer/BJD-Streaks.git"
@@ -9,10 +12,31 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "desktop": "electron .",
+    "desktop:dist": "electron-builder --win portable",
     "test": "node --test",
     "check": "npm run test && npm run build"
   },
+  "build": {
+    "appId": "net.mcbjd.bjd-streaks",
+    "productName": "BJD Streaks",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "artifactName": "BJD-Streaks-${version}.${ext}"
+    }
+  },
   "devDependencies": {
+    "electron": "^33.3.2",
+    "electron-builder": "^25.1.8",
     "esbuild": "^0.25.5"
   }
 }

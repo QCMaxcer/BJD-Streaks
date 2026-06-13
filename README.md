@@ -15,6 +15,24 @@
 
 如果 Greasy Fork 无法访问，也可以下载本仓库的 `dist/bjd-wins.user.js`，在 Tampermonkey 后台中新建脚本并粘贴安装。
 
+## 桌面版
+
+桌面版目标是脱离浏览器插件，打包为 Windows 双击运行的程序。它使用 Electron 打开本地界面，并在内置登录窗口中登录布吉岛用户中心。
+
+```powershell
+npm.cmd install --cache .npm-cache
+npm.cmd run desktop
+npm.cmd run desktop:dist
+```
+
+- `npm.cmd run desktop`：开发模式启动桌面程序。
+- `npm.cmd run desktop:dist`：打包 Windows portable EXE，输出到 `release/`。
+- 桌面版会把战绩缓存到程序用户数据目录，不会把 token 写入项目文件。
+- 桌面版仍只读取当前登录账号 `binding/list` 返回的已绑定角色。
+- “更新”会抓取最新分页，并在命中本地缓存记录后停止。
+- “重新抓取”会清空当前账号缓存，再按截止日期完整抓取。
+- “启动后自动更新”默认开启，可在程序内取消勾选，偏好会保存在本地。
+
 ## 开发
 
 ```powershell
