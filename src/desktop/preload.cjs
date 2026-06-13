@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld("bjdDesktop", {
   logout: () => ipcRenderer.invoke("auth:logout"),
   getPreferences: () => ipcRenderer.invoke("preferences:get"),
   setPreferences: (preferences) => ipcRenderer.invoke("preferences:set", preferences),
-  loadAccount: () => ipcRenderer.invoke("account:load"),
+  loadAccount: (uuid = "") => ipcRenderer.invoke("account:load", { uuid }),
   loadCache: (uuid) => ipcRenderer.invoke("cache:load", { uuid }),
   clearRecords: (uuid) => ipcRenderer.invoke("cache:clear-records", { uuid }),
   updateRecords: (options) => ipcRenderer.invoke("records:update", options),

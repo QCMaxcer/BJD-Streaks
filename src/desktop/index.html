@@ -50,7 +50,13 @@
               <span class="player-profile-kicker">当前游戏账号</span>
               <h2 id="playerName">未知玩家</h2>
             </div>
-            <span id="profileStatus" class="profile-status">资料暂不可用</span>
+            <div class="player-profile-actions">
+              <label class="account-switcher">
+                <span>切换账号</span>
+                <select id="accountSelect" aria-label="切换游戏账号"></select>
+              </label>
+              <span id="profileStatus" class="profile-status">资料暂不可用</span>
+            </div>
           </div>
           <div class="player-profile-grid">
             <div class="profile-stat"><span>公会</span><strong id="profileGuild">无</strong></div>
@@ -140,9 +146,9 @@
               <span>时间范围</span>
               <select id="visualizationRange">
                 <option value="30">最近 30 天</option>
-                <option value="90" selected>最近 90 天</option>
+                <option value="90">最近 90 天</option>
                 <option value="180">最近 180 天</option>
-                <option value="all">全部历史</option>
+                <option value="all" selected>全部历史</option>
                 <option value="custom">自定义</option>
               </select>
             </label>
@@ -154,6 +160,9 @@
               <span>结束日期</span>
               <input id="visualizationTo" type="date">
             </label>
+          </div>
+          <div id="visualizationSummary" class="visualization-summary"></div>
+          <div class="visualization-command-row">
             <div class="visualization-field visualization-zoom-field">
               <span>横向缩放 <strong id="visualizationZoomValue">100%</strong></span>
               <input id="visualizationZoom" type="range" min="1" max="8" step="0.25" value="1">
@@ -164,12 +173,24 @@
               <button id="visualizationExportSvg" class="button primary" type="button">导出 SVG</button>
             </div>
           </div>
-          <div id="visualizationSummary" class="visualization-summary"></div>
           <p id="visualizationNotice" class="visualization-notice"></p>
-          <div id="visualizationLegend" class="visualization-legend" aria-label="图例"></div>
-          <div id="visualizationChartScroller" class="visualization-chart-scroller">
-            <div id="visualizationChart" class="visualization-chart"></div>
-            <div id="visualizationTooltip" class="visualization-tooltip hidden"></div>
+          <div class="visualization-chart-card">
+            <div class="visualization-chart-head">
+              <div class="visualization-chart-title-block">
+                <h3 id="visualizationChartTitle"></h3>
+                <p id="visualizationChartSubtitle"></p>
+              </div>
+              <div id="visualizationLegend" class="visualization-legend" aria-label="图例"></div>
+            </div>
+            <div class="visualization-axis-labels" aria-hidden="true">
+              <span id="visualizationTrackLabel" class="visualization-axis-label visualization-axis-label-track"></span>
+              <span id="visualizationPrimaryAxisLabel" class="visualization-axis-label visualization-axis-label-primary"></span>
+              <span id="visualizationSecondaryAxisLabel" class="visualization-axis-label visualization-axis-label-secondary"></span>
+            </div>
+            <div id="visualizationChartScroller" class="visualization-chart-scroller">
+              <div id="visualizationChart" class="visualization-chart"></div>
+              <div id="visualizationTooltip" class="visualization-tooltip hidden"></div>
+            </div>
           </div>
         </div>
       </div>

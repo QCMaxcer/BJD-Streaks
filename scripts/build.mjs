@@ -1,11 +1,15 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { build } from "esbuild";
+
+const packageJson = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8"),
+);
 
 const banner = `// ==UserScript==
 // @license MIT
 // @name         布吉岛战绩与连胜统计
 // @namespace    https://user.mcbjd.net/
-// @version      1.0.0
+// @version      ${packageJson.version}
 // @description  分类查找布吉岛战绩，并统计当前连胜与历史最高连胜
 // @author       QC_Max
 // @match        https://user.mcbjd.net/*

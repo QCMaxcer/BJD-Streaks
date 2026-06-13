@@ -40,6 +40,15 @@ function shortDate(dateKey) {
   return `${month}/${day}`;
 }
 
+function fullDate(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value || "未知日期");
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function rangeText(model) {
   return `${model.range.from} 至 ${model.range.to}`;
 }
@@ -62,6 +71,28 @@ function spanStyle(role) {
   return { stroke: COLORS.other, width: 5 };
 }
 
+function spanRoleText(role) {
+  return {
+    best: "历史最高连胜",
+    current: "当前连胜",
+    "current-best": "当前最高连胜",
+    other: "其他连胜",
+  }[role] || "连胜";
+}
+
+function spanTooltip(span) {
+  const truncated = [
+    span.leftTruncated ? "左侧被截断" : "",
+    span.rightTruncated ? "右侧被截断" : "",
+  ].filter(Boolean);
+  return [
+    spanRoleText(span.role),
+    `连胜 ${span.count} 局`,
+    `${fullDate(span.start?.date)} 至 ${fullDate(span.end?.date)}`,
+    truncated.length ? truncated.join("，") : "",
+  ].filter(Boolean).join("\n");
+}
+
 export function getVisualizationLegendItems(chartType) {
   return chartType === "line"
     ? [
@@ -77,6 +108,19 @@ export function getVisualizationLegendItems(chartType) {
         ["历史最高", COLORS.best],
         ["当前连胜", COLORS.current],
       ];
+}
+
+export function getVisualizationFixedLabels(model, {
+  chartType = "bars",
+  playerName = "未知玩家",
+} = {}) {
+  return {
+    title: `${playerName} · ${model.modeName} · ${chartType === "line" ? "累计连胜" : "每日胜负频次"}`,
+    subtitle: `${rangeText(model)} · 当前连胜 ${model.current.count} · 历史最高 ${model.best.count}`,
+    trackLabel: "连胜跨度",
+    primaryAxisLabel: chartType === "line" ? "连胜局数" : "胜利局数",
+    secondaryAxisLabel: chartType === "line" ? "" : "失败局数",
+  };
 }
 
 function renderLegend(svg, width, chartType) {
@@ -97,14 +141,17 @@ function renderLegend(svg, width, chartType) {
   }
 }
 
-function renderStreakTrack(svg, model, width) {
+function renderStreakTrack(svg, model, width, { showAxisLabels = true } = {}) {
   const labelY = STREAK_TRACK_LABEL_Y;
   const y = STREAK_TRACK_LINE_Y;
-  appendText(svg, "连胜跨度", 30, labelY, {
-    fill: COLORS.muted,
-    "font-size": 12,
-    "font-weight": 700,
-  });
+  const hits = [];
+  if (showAxisLabels) {
+    appendText(svg, "连胜跨度", 30, labelY, {
+      fill: COLORS.muted,
+      "font-size": 12,
+      "font-weight": 700,
+    });
+  }
   svg.append(svgElement("line", {
     x1: CHART_LEFT,
     x2: width - CHART_RIGHT,
@@ -117,6 +164,8 @@ function renderStreakTrack(svg, model, width) {
   for (const span of model.spans) {
     const startX = xScale(model, width, span.visibleStart);
     const endX = xScale(model, width, span.visibleEnd);
+    const left = Math.min(startX, endX);
+    const right = Math.max(startX, endX);
     const style = spanStyle(span.role);
     const label = span.role === "current-best"
       ? `当前最高 ${span.count}`
@@ -175,7 +224,19 @@ function renderStreakTrack(svg, model, width) {
         "text-anchor": "middle",
       });
     }
+    hits.push({
+      kind: "span",
+      priority: 2,
+      x: (startX + endX) / 2,
+      x1: left,
+      x2: right,
+      y,
+      hitTop: y - 18,
+      hitBottom: y + 18,
+      text: spanTooltip(span),
+    });
   }
+  return hits;
 }
 
 function renderXAxis(svg, model, width, y) {
@@ -200,7 +261,7 @@ function renderXAxis(svg, model, width, y) {
   });
 }
 
-function renderBars(svg, model, width) {
+function renderBars(svg, model, width, { showAxisLabels = true } = {}) {
   const top = 190;
   const bottom = 585;
   const zeroY = 390;
@@ -244,8 +305,10 @@ function renderBars(svg, model, width) {
     "font-size": 11,
     "text-anchor": "end",
   });
-  appendText(svg, "胜利局数", 30, top + 12, { fill: COLORS.win, "font-size": 11, "font-weight": 700 });
-  appendText(svg, "失败局数", 30, bottom, { fill: COLORS.loss, "font-size": 11, "font-weight": 700 });
+  if (showAxisLabels) {
+    appendText(svg, "胜利局数", 30, top + 12, { fill: COLORS.win, "font-size": 11, "font-weight": 700 });
+    appendText(svg, "失败局数", 30, bottom, { fill: COLORS.loss, "font-size": 11, "font-weight": 700 });
+  }
 
   model.days.forEach((day) => {
     const timestamp = new Date(`${day.dateKey}T12:00:00`).getTime();
@@ -342,7 +405,7 @@ function buildDailyLinePoints(model, width, yScale) {
   });
 }
 
-function renderLine(svg, model, width) {
+function renderLine(svg, model, width, { showAxisLabels = true } = {}) {
   const top = 155;
   const bottom = 575;
   const plotTop = 190;
@@ -369,7 +432,9 @@ function renderLine(svg, model, width) {
       "text-anchor": "end",
     });
   }
-  appendText(svg, "连胜局数", 30, plotTop + 12, { fill: COLORS.line, "font-size": 11, "font-weight": 700 });
+  if (showAxisLabels) {
+    appendText(svg, "连胜局数", 30, plotTop + 12, { fill: COLORS.line, "font-size": 11, "font-weight": 700 });
+  }
   svg.append(svgElement("path", {
     d: path,
     fill: "none",
@@ -395,27 +460,33 @@ export function createVisualizationSvg(model, {
     ? getExportChartWidth(model, { exportDensity })
     : getPreviewChartWidth(model, { viewportWidth, fitZoom, zoomMultiplier });
   const height = 660;
-  const title = `${playerName} · ${model.modeName} · ${chartType === "line" ? "累计连胜" : "每日胜负频次"}`;
-  const subtitle = `${rangeText(model)} · 当前连胜 ${model.current.count} · 历史最高 ${model.best.count}`;
+  const labels = getVisualizationFixedLabels(model, { chartType, playerName });
+  const showFixedSvgText = renderMode === "export";
   const svg = svgElement("svg", {
     viewBox: `0 0 ${width} ${height}`,
     width,
     height,
     role: "img",
-    "aria-label": `${title}，${subtitle}`,
+    "aria-label": `${labels.title}，${labels.subtitle}`,
     "data-chart-width": width,
     "data-chart-height": height,
     style: "font-family: Microsoft YaHei, Segoe UI, sans-serif; background: #ffffff;",
   });
   svg.append(svgElement("rect", { width, height, fill: "#fff" }));
-  svg.append(svgElement("title", {}, title));
-  svg.append(svgElement("desc", {}, subtitle));
-  appendText(svg, title, 30, 33, { fill: COLORS.ink, "font-size": 20, "font-weight": 700 });
-  appendText(svg, subtitle, 30, 57, { fill: COLORS.muted, "font-size": 12 });
+  if (renderMode === "export") {
+    svg.append(svgElement("title", {}, labels.title));
+    svg.append(svgElement("desc", {}, labels.subtitle));
+  }
+  if (showFixedSvgText) {
+    appendText(svg, labels.title, 30, 33, { fill: COLORS.ink, "font-size": 20, "font-weight": 700 });
+    appendText(svg, labels.subtitle, 30, 57, { fill: COLORS.muted, "font-size": 12 });
+  }
   if (renderMode === "export") renderLegend(svg, width, chartType);
-  renderStreakTrack(svg, model, width);
-  const hits = chartType === "line" ? renderLine(svg, model, width) : renderBars(svg, model, width);
-  return { svg, width, height, hits };
+  const spanHits = renderStreakTrack(svg, model, width, { showAxisLabels: showFixedSvgText });
+  const hits = chartType === "line"
+    ? renderLine(svg, model, width, { showAxisLabels: showFixedSvgText })
+    : renderBars(svg, model, width, { showAxisLabels: showFixedSvgText });
+  return { svg, width, height, hits: [...spanHits, ...hits] };
 }
 
 export function renderVisualizationSvg(container, model, options = {}) {

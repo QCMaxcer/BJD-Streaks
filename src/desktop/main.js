@@ -1,11 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from "electron";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ApiError, fetchAllRecords } from "../api.js";
 import { unwrapData } from "../core.js";
-import { loadDesktopAccount } from "./account.js";
+import { loadDesktopAccount, selectDesktopAccount } from "./account.js";
 import { createCacheStore } from "./cache.js";
+import { createFetchCoordinator } from "./fetch-coordinator.js";
 import { createPreferenceStore } from "./preferences.js";
 
 const SITE_ORIGIN = "https://user.mcbjd.net";
@@ -17,9 +18,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
 let loginWindow = null;
 let authToken = "";
-let currentFetchController = null;
 let cacheStore = null;
 let preferenceStore = null;
+const fetchCoordinator = createFetchCoordinator();
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -28,6 +29,7 @@ function createMainWindow() {
     minWidth: 980,
     minHeight: 680,
     title: "BJD Streaks",
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -39,6 +41,7 @@ function createMainWindow() {
     shell.openExternal(url);
     return { action: "deny" };
   });
+  mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 }
 
@@ -83,12 +86,14 @@ function openLoginWindow() {
       title: "登录布吉岛用户中心",
       parent: mainWindow ?? undefined,
       modal: false,
+      autoHideMenuBar: true,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
       },
     });
+    loginWindow.setMenuBarVisibility(false);
 
     const check = async () => {
       try {
@@ -192,10 +197,11 @@ function registerIpc() {
     return { authenticated: false };
   });
 
-  ipcMain.handle("account:load", async (event) => {
+  ipcMain.handle("account:load", async (event, { uuid = "" } = {}) => {
     return loadDesktopAccount({
       post: desktopPost,
       cacheStore,
+      uuid,
       onCache: (payload) => event.sender.send("account:cache", payload),
     });
   });
@@ -210,31 +216,42 @@ function registerIpc() {
   });
 
   ipcMain.handle("records:cancel", () => {
-    currentFetchController?.abort();
+    fetchCoordinator.cancel();
     return { ok: true };
   });
 
   const fetchAndCache = async (event, options = {}, mode) => {
-    currentFetchController?.abort();
-    currentFetchController = new AbortController();
     const { uuid, playerName = "", cutoffDate = "", pageDelayMs = 100 } = options;
-    const knownRecordKeys = mode === "update" ? await cacheStore.readKeys(uuid) : [];
+    const { account } = selectDesktopAccount(await desktopPost("/binding/list"), uuid);
+    const controller = fetchCoordinator.start();
 
     try {
+      const knownRecordKeys = mode === "update" ? await cacheStore.readKeys(account.uuid) : [];
       const result = await fetchAllRecords({
-        uuid,
+        uuid: account.uuid,
         cutoffDate,
         pageDelayMs,
-        signal: currentFetchController.signal,
+        signal: controller.signal,
         post: desktopPost,
         knownRecordKeys,
         stopWhenKnownRecord: mode === "update",
-        onProgress: (progress) => event.sender.send("records:progress", progress),
+        onProgress: (progress) => event.sender.send("records:progress", {
+          ...progress,
+          uuid: account.uuid,
+        }),
       });
       const cache =
         mode === "update"
-          ? await cacheStore.mergeAndWrite({ uuid, playerName, records: result.records })
-          : await cacheStore.write({ uuid, playerName, records: result.records });
+          ? await cacheStore.mergeAndWrite({
+              uuid: account.uuid,
+              playerName: playerName || account.name,
+              records: result.records,
+            })
+          : await cacheStore.write({
+              uuid: account.uuid,
+              playerName: playerName || account.name,
+              records: result.records,
+            });
       return {
         ...result,
         mode,
@@ -245,7 +262,7 @@ function registerIpc() {
         knownRecordHits: result.knownRecordHits ?? 0,
       };
     } finally {
-      currentFetchController = null;
+      fetchCoordinator.finish(controller);
     }
   };
 
@@ -286,6 +303,7 @@ function registerIpc() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   const userDataPath = app.getPath("userData");
   cacheStore = createCacheStore(path.join(userDataPath, "records-cache"), {
     legacyDirs: [path.join(userDataPath, "cache")],

@@ -1,8 +1,9 @@
 {
   "name": "bjd-wins",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "布吉岛战绩分类与连胜统计工具",
   "author": "QCMaxcer",
+  "license": "MIT",
   "private": true,
   "main": "src/desktop/main.js",
   "repository": {
@@ -10,6 +11,9 @@
     "url": "https://github.com/QCMaxcer/BJD-Streaks.git"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "desktop": "electron .",
@@ -25,6 +29,7 @@
     },
     "files": [
       "src/**/*",
+      "LICENSE",
       "package.json"
     ],
     "win": {
@@ -35,8 +40,8 @@
     }
   },
   "devDependencies": {
-    "electron": "^33.3.2",
-    "electron-builder": "^25.1.8",
-    "esbuild": "^0.25.5"
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1"
   }
 }

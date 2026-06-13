@@ -8,6 +8,7 @@ export const SOFT_MAX_PREVIEW_WIDTH = 60000;
 export const MAX_ZOOM_MULTIPLIER = 64;
 export const STREAK_TRACK_LABEL_Y = 112;
 export const STREAK_TRACK_LINE_Y = 136;
+export const DEFAULT_VISUALIZATION_RANGE_PRESET = "all";
 
 export function getVisualizationBaseWidth(model, {
   dayDensity = PREVIEW_DAY_DENSITY,
@@ -61,4 +62,32 @@ export function getStreakTrackLayout() {
     lineY: STREAK_TRACK_LINE_Y,
     minGap: STREAK_TRACK_LINE_Y - STREAK_TRACK_LABEL_Y,
   };
+}
+
+export function calculateTooltipPosition({
+  clientX,
+  clientY,
+  tooltipWidth = 260,
+  tooltipHeight = 110,
+  viewportWidth,
+  viewportHeight,
+  offset = 14,
+  margin = 8,
+} = {}) {
+  const width = Number.isFinite(Number(viewportWidth)) ? Number(viewportWidth) : 0;
+  const height = Number.isFinite(Number(viewportHeight)) ? Number(viewportHeight) : 0;
+  const tipWidth = Math.max(1, Number(tooltipWidth) || 260);
+  const tipHeight = Math.max(1, Number(tooltipHeight) || 110);
+  const x = Number(clientX) || 0;
+  const y = Number(clientY) || 0;
+
+  let left = x + offset;
+  if (width && left + tipWidth + margin > width) left = x - tipWidth - offset;
+  left = Math.max(margin, width ? Math.min(left, width - tipWidth - margin) : left);
+
+  let top = y - tipHeight - offset;
+  if (top < margin) top = y + offset;
+  top = Math.max(margin, height ? Math.min(top, height - tipHeight - margin) : top);
+
+  return { left: Math.round(left), top: Math.round(top) };
 }

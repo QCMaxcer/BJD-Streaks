@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  calculateTooltipPosition,
   calculateFitZoom,
   clampZoomMultiplier,
+  DEFAULT_VISUALIZATION_RANGE_PRESET,
   getExportChartWidth,
   getStreakTrackLayout,
   getPreviewChartWidth,
@@ -19,6 +21,10 @@ test("fit zoom makes the current range fit the viewport width", () => {
   const fit = calculateFitZoom(chart, 900);
   assert.equal(Math.round(base * fit), 900);
   assert.equal(getPreviewChartWidth(chart, { viewportWidth: 900, fitZoom: fit }), 900);
+});
+
+test("visualization defaults to all history", () => {
+  assert.equal(DEFAULT_VISUALIZATION_RANGE_PRESET, "all");
 });
 
 test("preview zoom multiplier cannot shrink below the fit view", () => {
@@ -46,4 +52,26 @@ test("export width ignores preview zoom and uses export density", () => {
 test("streak track label has dedicated space above the track line", () => {
   const layout = getStreakTrackLayout();
   assert.ok(layout.minGap >= 20);
+});
+
+test("tooltip prefers the upper right and falls back near viewport edges", () => {
+  assert.deepEqual(calculateTooltipPosition({
+    clientX: 100,
+    clientY: 200,
+    tooltipWidth: 120,
+    tooltipHeight: 80,
+    viewportWidth: 800,
+    viewportHeight: 600,
+    offset: 10,
+  }), { left: 110, top: 110 });
+
+  assert.deepEqual(calculateTooltipPosition({
+    clientX: 760,
+    clientY: 40,
+    tooltipWidth: 120,
+    tooltipHeight: 80,
+    viewportWidth: 800,
+    viewportHeight: 600,
+    offset: 10,
+  }), { left: 630, top: 50 });
 });

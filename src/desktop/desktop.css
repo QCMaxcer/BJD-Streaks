@@ -123,6 +123,38 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37
 }
 .player-profile-kicker { color: #64748b; font-size: 12px; }
 .player-profile h2 { margin: 4px 0 0; color: #1d4ed8; font-size: 25px; }
+.player-profile-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.account-switcher {
+  display: grid;
+  gap: 4px;
+  min-width: 190px;
+  margin: 0;
+}
+.account-switcher span {
+  color: #64748b;
+  font-size: 11px;
+}
+.account-switcher select {
+  min-height: 34px;
+  padding: 6px 30px 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #172033;
+  background: #fff;
+  font: inherit;
+}
+.account-switcher select:disabled {
+  color: #475569;
+  opacity: 1;
+  background: #eef2f7;
+  cursor: default;
+}
 .profile-status {
   padding: 5px 10px;
   border-radius: 999px;
@@ -542,15 +574,21 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37
   color: #fff;
   background: #2563eb;
 }
+.visualization-command-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 12px;
+}
 .visualization-actions {
-  grid-column: 4 / -1;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: nowrap;
 }
 .visualization-zoom-field {
-  grid-column: 1 / 4;
+  min-width: 260px;
 }
 .visualization-zoom-field span {
   display: flex;
@@ -570,9 +608,10 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37
   align-items: center;
   gap: 18px;
   min-height: 24px;
-  margin: 4px 2px 8px;
+  margin: 0;
   color: #64748b;
   font-size: 12px;
+  pointer-events: none;
 }
 .visualization-legend-item {
   display: inline-flex;
@@ -599,11 +638,73 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37
   color: #64748b;
   font-size: 12px;
 }
+.visualization-chart-card {
+  position: relative;
+  border: 1px solid #d7deea;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+.visualization-chart-head {
+  position: absolute;
+  z-index: 5;
+  top: 16px;
+  right: 28px;
+  left: 28px;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+  pointer-events: none;
+}
+.visualization-chart-title-block h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.25;
+}
+.visualization-chart-title-block p {
+  margin: 6px 0 0;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.visualization-axis-labels {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 108px;
+  pointer-events: none;
+}
+.visualization-axis-label {
+  position: absolute;
+  left: 30px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+.visualization-axis-label-track {
+  top: 100px;
+  color: #64748b;
+}
+.visualization-axis-label-primary {
+  top: 190px;
+  color: #16a34a;
+}
+.visualization-axis-label-secondary {
+  top: 573px;
+  color: #dc2626;
+}
+.visualization-axis-label.hidden {
+  display: none !important;
+}
 .visualization-chart-scroller {
   position: relative;
   min-height: 680px;
   overflow: auto;
-  border: 1px solid #d7deea;
   border-radius: 14px;
   background: #fff;
 }
@@ -634,8 +735,27 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37
   .dialog-card { max-height: calc(100vh - 24px); }
   .match-player-grid, .match-bottom-grid { grid-template-columns: 1fr; }
   .visualization-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .visualization-zoom-field, .visualization-actions { grid-column: 1 / -1; }
+  .visualization-command-row { grid-template-columns: 1fr; }
+  .visualization-actions { justify-content: flex-start; }
   .visualization-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .player-profile-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .player-profile-actions {
+    justify-content: flex-start;
+  }
+  .account-switcher {
+    width: 100%;
+  }
+  .visualization-chart-head {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .visualization-legend {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 680px) {

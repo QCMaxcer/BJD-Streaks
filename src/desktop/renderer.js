@@ -14,10 +14,13 @@ import {
 } from "../streak-visualization.js";
 import {
   calculateFitZoom,
+  calculateTooltipPosition,
   clampZoomMultiplier,
+  DEFAULT_VISUALIZATION_RANGE_PRESET,
 } from "../visualization-layout.js";
 import {
   createVisualizationSvg,
+  getVisualizationFixedLabels,
   getVisualizationLegendItems,
   renderVisualizationSvg,
   serializeVisualizationSvg,
@@ -33,19 +36,21 @@ const state = {
   authenticated: false,
   autoUpdateEnabled: true,
   activeTab: "streaks",
+  accounts: [],
   account: null,
   playerInfo: null,
   playerInfoSource: "unavailable",
   records: [],
   stats: buildModeStats([]),
   loading: false,
+  accountSwitching: false,
   filters: { mode: "", category: "", result: "", query: "", from: "", to: "" },
   detailCache: new Map(),
   visualization: {
     open: false,
     mode: "all",
     chartType: "bars",
-    rangePreset: "90",
+    rangePreset: DEFAULT_VISUALIZATION_RANGE_PRESET,
     from: "",
     to: "",
     fitZoom: 1,
@@ -73,6 +78,7 @@ const els = {
   recordsPanel: document.querySelector("#recordsPanel"),
   playerProfile: document.querySelector("#playerProfile"),
   playerName: document.querySelector("#playerName"),
+  accountSelect: document.querySelector("#accountSelect"),
   profileStatus: document.querySelector("#profileStatus"),
   profileGuild: document.querySelector("#profileGuild"),
   profileBjdLevel: document.querySelector("#profileBjdLevel"),
@@ -111,7 +117,12 @@ const els = {
   visualizationExportSvg: document.querySelector("#visualizationExportSvg"),
   visualizationSummary: document.querySelector("#visualizationSummary"),
   visualizationNotice: document.querySelector("#visualizationNotice"),
+  visualizationChartTitle: document.querySelector("#visualizationChartTitle"),
+  visualizationChartSubtitle: document.querySelector("#visualizationChartSubtitle"),
   visualizationLegend: document.querySelector("#visualizationLegend"),
+  visualizationTrackLabel: document.querySelector("#visualizationTrackLabel"),
+  visualizationPrimaryAxisLabel: document.querySelector("#visualizationPrimaryAxisLabel"),
+  visualizationSecondaryAxisLabel: document.querySelector("#visualizationSecondaryAxisLabel"),
   visualizationChartScroller: document.querySelector("#visualizationChartScroller"),
   visualizationChart: document.querySelector("#visualizationChart"),
   visualizationTooltip: document.querySelector("#visualizationTooltip"),
@@ -188,11 +199,25 @@ function setLoading(loading) {
   els.cutoffDate.disabled = loading;
   els.pageDelay.disabled = loading;
   els.autoUpdate.disabled = loading;
+  els.accountSelect.disabled = !state.authenticated || state.accountSwitching || state.accounts.length <= 1;
   els.cancelButton.classList.toggle("hidden", !loading);
+}
+
+function renderAccountSelect() {
+  const accounts = state.accounts.length ? state.accounts : state.account ? [state.account] : [];
+  els.accountSelect.replaceChildren();
+  for (const account of accounts) {
+    const option = createElement("option", "", account.name || account.uuid || "未知玩家");
+    option.value = account.uuid;
+    option.selected = account.uuid === state.account?.uuid;
+    els.accountSelect.append(option);
+  }
+  els.accountSelect.disabled = !state.authenticated || state.accountSwitching || accounts.length <= 1;
 }
 
 function renderProfile() {
   els.playerProfile.classList.toggle("hidden", !state.authenticated || !state.account);
+  renderAccountSelect();
   if (!state.account) return;
 
   const profile = state.playerInfo ?? {};
@@ -394,6 +419,20 @@ function renderVisualizationLegend() {
   }
 }
 
+function renderVisualizationFixedLabels(model) {
+  const labels = getVisualizationFixedLabels(model, {
+    chartType: state.visualization.chartType,
+    playerName: visualizationPlayerName(),
+  });
+  els.visualizationChartTitle.textContent = labels.title;
+  els.visualizationChartSubtitle.textContent = labels.subtitle;
+  els.visualizationTrackLabel.textContent = labels.trackLabel;
+  els.visualizationPrimaryAxisLabel.textContent = labels.primaryAxisLabel;
+  els.visualizationPrimaryAxisLabel.style.color = state.visualization.chartType === "line" ? "#0969da" : "#16a34a";
+  els.visualizationSecondaryAxisLabel.textContent = labels.secondaryAxisLabel;
+  els.visualizationSecondaryAxisLabel.classList.toggle("hidden", !labels.secondaryAxisLabel);
+}
+
 function visualizationViewportWidth() {
   return Math.max(320, Math.floor(els.visualizationChartScroller.clientWidth || 0));
 }
@@ -408,14 +447,35 @@ function bindVisualizationHover(chart) {
     if (!hits.length) return;
     const rect = svg.getBoundingClientRect();
     const viewX = ((event.clientX - rect.left) / rect.width) * chart.width;
-    let nearest = hits[0];
-    for (const hit of hits) {
-      if (Math.abs(hit.x - viewX) < Math.abs(nearest.x - viewX)) nearest = hit;
+    const viewY = ((event.clientY - rect.top) / rect.height) * chart.height;
+    const spanHits = hits
+      .filter((hit) => (
+        hit.kind === "span" &&
+        viewX >= hit.x1 - 8 &&
+        viewX <= hit.x2 + 8 &&
+        viewY >= hit.hitTop &&
+        viewY <= hit.hitBottom
+      ))
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    let nearest = spanHits[0];
+    if (!nearest) {
+      nearest = hits.find((hit) => hit.kind !== "span") ?? hits[0];
+      for (const hit of hits.filter((item) => item.kind !== "span")) {
+        if (Math.abs(hit.x - viewX) < Math.abs(nearest.x - viewX)) nearest = hit;
+      }
     }
     els.visualizationTooltip.textContent = nearest.text;
-    els.visualizationTooltip.style.left = `${Math.min(window.innerWidth - 280, event.clientX + 14)}px`;
-    els.visualizationTooltip.style.top = `${Math.min(window.innerHeight - 110, event.clientY + 14)}px`;
     els.visualizationTooltip.classList.remove("hidden");
+    const position = calculateTooltipPosition({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      tooltipWidth: els.visualizationTooltip.offsetWidth || 260,
+      tooltipHeight: els.visualizationTooltip.offsetHeight || 110,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    });
+    els.visualizationTooltip.style.left = `${position.left}px`;
+    els.visualizationTooltip.style.top = `${position.top}px`;
   });
   svg.addEventListener("pointerleave", hideVisualizationTooltip);
 }
@@ -454,6 +514,7 @@ function renderVisualization({
     els.visualizationExportSvg.disabled = model.validCount === 0;
     renderVisualizationModeOptions();
     renderVisualizationSummary(model);
+    renderVisualizationFixedLabels(model);
     renderVisualizationLegend();
     state.visualization.chart = renderVisualizationSvg(els.visualizationChart, model, {
       renderMode: "preview",
@@ -484,7 +545,7 @@ function openVisualization(mode = "all") {
   if (!state.records.length) return;
   state.visualization.open = true;
   state.visualization.mode = mode;
-  state.visualization.rangePreset = "90";
+  state.visualization.rangePreset = DEFAULT_VISUALIZATION_RANGE_PRESET;
   state.visualization.from = "";
   state.visualization.to = "";
   state.visualization.fitZoom = 1;
@@ -552,8 +613,10 @@ async function exportVisualization(format) {
 }
 
 function applyAccountPayload(payload, { source = payload?.playerInfoSource ?? "cache" } = {}) {
-  if (!payload?.account) return null;
-  state.account = payload.account;
+  const account = payload?.selectedAccount ?? payload?.account;
+  if (!account) return null;
+  state.accounts = Array.isArray(payload.accounts) && payload.accounts.length ? payload.accounts : [account];
+  state.account = account;
   state.playerInfo = payload.cache?.playerInfo ?? null;
   state.playerInfoSource = state.playerInfo ? source : "unavailable";
   renderProfile();
@@ -562,11 +625,11 @@ function applyAccountPayload(payload, { source = payload?.playerInfoSource ?? "c
   return payload.cache;
 }
 
-async function loadCurrentAccount({ autoUpdate = false } = {}) {
+async function loadCurrentAccount({ autoUpdate = false, uuid = "" } = {}) {
   setLoading(true);
   setStatus("正在读取当前游戏账号与玩家资料…");
   try {
-    const result = await desktop.loadAccount();
+    const result = await desktop.loadAccount(uuid);
     const cache = applyAccountPayload(result);
     setLoading(false);
 
@@ -592,6 +655,43 @@ async function loadCurrentAccount({ autoUpdate = false } = {}) {
   }
 }
 
+async function switchAccount(uuid) {
+  const nextUuid = String(uuid || "");
+  if (!nextUuid || nextUuid === state.account?.uuid) {
+    renderAccountSelect();
+    return;
+  }
+
+  state.accountSwitching = true;
+  setLoading(true);
+  closeVisualization();
+  els.detailDialog.classList.add("hidden");
+  state.detailCache.clear();
+  setStatus("正在切换游戏账号…");
+  try {
+    await desktop.cancelFetch();
+    const result = await desktop.loadAccount(nextUuid);
+    const cache = applyAccountPayload(result);
+    if (result.profileError) {
+      const prefix = cache?.records?.length
+        ? `已切换账号并载入本地记录 ${cache.records.length} 条。`
+        : "已切换账号，当前账号暂无本地记录。";
+      setStatus(`${prefix} 玩家资料刷新失败，已使用${cache?.playerInfo ? "缓存资料" : "基础账号信息"}。`, "error");
+    } else if (cache?.records?.length) {
+      setStatus(`已切换账号，玩家资料已更新，已载入本地记录 ${cache.records.length} 条。`, "success");
+    } else {
+      setStatus("已切换账号，玩家资料已更新，当前账号暂无本地记录。", "success");
+    }
+  } catch (error) {
+    setStatus(errorMessage(error), "error");
+    renderAccountSelect();
+  } finally {
+    state.accountSwitching = false;
+    setLoading(false);
+    renderProfile();
+  }
+}
+
 async function login() {
   setStatus("请在弹出的窗口中登录布吉岛用户中心。");
   try {
@@ -608,6 +708,7 @@ async function logout() {
   await desktop.logout();
   closeVisualization();
   state.authenticated = false;
+  state.accounts = [];
   state.account = null;
   state.playerInfo = null;
   state.playerInfoSource = "unavailable";
@@ -653,6 +754,7 @@ function stopLabel(stoppedBy) {
 
 async function runRecordsAction(mode, { automatic = false } = {}) {
   if (!state.account?.uuid || state.loading) return;
+  const actionUuid = state.account.uuid;
 
   setLoading(true);
   setStatus(
@@ -666,15 +768,17 @@ async function runRecordsAction(mode, { automatic = false } = {}) {
       mode === "update"
         ? await desktop.updateRecords(options)
         : await desktop.refetchRecords(options);
+    if (state.account?.uuid !== actionUuid) return;
     setRecords(result.records);
     setStatus(
       `${mode === "update" ? "更新" : "重新抓取"}完成：本次新增 ${result.fetchedRecords} 条，缓存共 ${result.cachedRecords} 条；扫描 ${result.scannedCount} 条、${result.pagesFetched} 页（${stopLabel(result.stoppedBy)}）。`,
       "success",
     );
   } catch (error) {
+    if (state.account?.uuid !== actionUuid) return;
     setStatus(errorMessage(error), error?.name === "AbortError" ? "" : "error");
   } finally {
-    setLoading(false);
+    if (!state.accountSwitching && state.account?.uuid === actionUuid) setLoading(false);
   }
 }
 
@@ -899,6 +1003,7 @@ function bindEvents() {
   });
 
   desktop.onRecordsProgress((progress) => {
+    if (progress.uuid && progress.uuid !== state.account?.uuid) return;
     if (progress.phase === "delay") {
       setStatus(`已扫描 ${progress.scannedCount} 条，保留 ${progress.count} 条；等待 ${(progress.waitMs / 1000).toFixed(1)} 秒后读取第 ${progress.page} 页…`);
       return;
@@ -914,6 +1019,7 @@ function bindEvents() {
 
   els.loginButton.addEventListener("click", login);
   els.logoutButton.addEventListener("click", logout);
+  els.accountSelect.addEventListener("change", (event) => switchAccount(event.target.value));
   els.updateButton.addEventListener("click", () => runRecordsAction("update"));
   els.refetchButton.addEventListener("click", () => {
     const confirmed = window.confirm(
@@ -951,7 +1057,7 @@ function bindEvents() {
   });
   els.visualizationMode.addEventListener("change", (event) => {
     state.visualization.mode = event.target.value;
-    state.visualization.rangePreset = "90";
+    state.visualization.rangePreset = DEFAULT_VISUALIZATION_RANGE_PRESET;
     state.visualization.zoomMultiplier = 1;
     renderVisualization();
   });
