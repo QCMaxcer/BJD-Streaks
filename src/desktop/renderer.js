@@ -26,6 +26,7 @@ import {
   serializeVisualizationSvg,
   svgToPngBase64,
 } from "./visualization.js";
+import { chooseAccountAfterUnbind } from "./account.js";
 
 const DISPLAY_LIMIT = 300;
 const DEFAULT_CUTOFF_DATE = "2025-01-01";
@@ -38,6 +39,9 @@ const state = {
   activeTab: "streaks",
   accounts: [],
   account: null,
+  bindingRequired: false,
+  bindingOperation: false,
+  accountMenuOpen: false,
   playerInfo: null,
   playerInfoSource: "unavailable",
   records: [],
@@ -72,13 +76,20 @@ const els = {
   pageDelay: document.querySelector("#pageDelay"),
   autoUpdate: document.querySelector("#autoUpdate"),
   statusText: document.querySelector("#statusText"),
+  bindingGuide: document.querySelector("#bindingGuide"),
+  bindingGuideStart: document.querySelector("#bindingGuideStart"),
+  bindingGuideOfficial: document.querySelector("#bindingGuideOfficial"),
+  tabBar: document.querySelector("#tabBar"),
   streaksTab: document.querySelector("#streaksTab"),
   recordsTab: document.querySelector("#recordsTab"),
   streaksPanel: document.querySelector("#streaksPanel"),
   recordsPanel: document.querySelector("#recordsPanel"),
   playerProfile: document.querySelector("#playerProfile"),
   playerName: document.querySelector("#playerName"),
-  accountSelect: document.querySelector("#accountSelect"),
+  accountMenu: document.querySelector("#accountMenu"),
+  accountMenuButton: document.querySelector("#accountMenuButton"),
+  accountMenuLabel: document.querySelector("#accountMenuLabel"),
+  accountMenuPanel: document.querySelector("#accountMenuPanel"),
   profileStatus: document.querySelector("#profileStatus"),
   profileGuild: document.querySelector("#profileGuild"),
   profileBjdLevel: document.querySelector("#profileBjdLevel"),
@@ -101,6 +112,13 @@ const els = {
   detailTitle: document.querySelector("#detailTitle"),
   detailBody: document.querySelector("#detailBody"),
   detailClose: document.querySelector("#detailClose"),
+  bindingDialog: document.querySelector("#bindingDialog"),
+  bindingDialogClose: document.querySelector("#bindingDialogClose"),
+  bindingForm: document.querySelector("#bindingForm"),
+  bindingCode: document.querySelector("#bindingCode"),
+  bindingDialogStatus: document.querySelector("#bindingDialogStatus"),
+  bindingOfficialButton: document.querySelector("#bindingOfficialButton"),
+  bindingSubmitButton: document.querySelector("#bindingSubmitButton"),
   visualizationDialog: document.querySelector("#visualizationDialog"),
   visualizationTitle: document.querySelector("#visualizationTitle"),
   visualizationClose: document.querySelector("#visualizationClose"),
@@ -183,11 +201,14 @@ function renderAuthControls() {
 }
 
 function renderTabs() {
+  const available = state.authenticated && Boolean(state.account?.uuid);
   const isStreaks = state.activeTab === "streaks";
+  els.bindingGuide.classList.toggle("hidden", !state.authenticated || !state.bindingRequired);
+  els.tabBar.classList.toggle("hidden", !available);
   els.streaksTab.classList.toggle("active", isStreaks);
   els.recordsTab.classList.toggle("active", !isStreaks);
-  els.streaksPanel.classList.toggle("hidden", !isStreaks);
-  els.recordsPanel.classList.toggle("hidden", isStreaks);
+  els.streaksPanel.classList.toggle("hidden", !available || !isStreaks);
+  els.recordsPanel.classList.toggle("hidden", !available || isStreaks);
 }
 
 function setLoading(loading) {
@@ -198,26 +219,77 @@ function setLoading(loading) {
   els.clearCacheButton.disabled = unavailable;
   els.cutoffDate.disabled = loading;
   els.pageDelay.disabled = loading;
-  els.autoUpdate.disabled = loading;
-  els.accountSelect.disabled = !state.authenticated || state.accountSwitching || state.accounts.length <= 1;
+  els.autoUpdate.disabled = unavailable;
+  els.accountMenuButton.disabled = !state.authenticated || state.accountSwitching || state.bindingOperation;
+  els.bindingGuideStart.disabled = !state.authenticated || state.bindingOperation;
+  els.bindingGuideOfficial.disabled = !state.authenticated || state.bindingOperation;
   els.cancelButton.classList.toggle("hidden", !loading);
 }
 
-function renderAccountSelect() {
+function closeAccountMenu() {
+  state.accountMenuOpen = false;
+  els.accountMenuButton.setAttribute("aria-expanded", "false");
+  els.accountMenuPanel.classList.add("hidden");
+}
+
+function openAccountMenu() {
+  if (els.accountMenuButton.disabled) return;
+  state.accountMenuOpen = true;
+  els.accountMenuButton.setAttribute("aria-expanded", "true");
+  els.accountMenuPanel.classList.remove("hidden");
+  const options = els.accountMenuPanel.querySelectorAll("button");
+  options[0]?.focus();
+}
+
+function renderAccountMenu() {
   const accounts = state.accounts.length ? state.accounts : state.account ? [state.account] : [];
-  els.accountSelect.replaceChildren();
+  els.accountMenuLabel.textContent = state.account?.name || "选择游戏账号";
+  els.accountMenuPanel.replaceChildren();
+  const list = createElement("div", "account-menu-list");
   for (const account of accounts) {
-    const option = createElement("option", "", account.name || account.uuid || "未知玩家");
-    option.value = account.uuid;
-    option.selected = account.uuid === state.account?.uuid;
-    els.accountSelect.append(option);
+    const row = createElement("div", "account-menu-row");
+    const option = createElement(
+      "button",
+      `account-menu-option${account.uuid === state.account?.uuid ? " current" : ""}`,
+    );
+    option.type = "button";
+    option.setAttribute("role", "menuitemradio");
+    option.setAttribute("aria-checked", String(account.uuid === state.account?.uuid));
+    option.dataset.accountUuid = account.uuid;
+    option.append(
+      createElement("strong", "", account.name || account.uuid || "未知玩家"),
+      createElement("span", "", account.uuid === state.account?.uuid ? "当前账号" : account.uuid),
+    );
+    option.addEventListener("click", () => {
+      closeAccountMenu();
+      switchAccount(account.uuid);
+    });
+
+    const unbind = createElement("button", "account-menu-unbind", "×");
+    unbind.type = "button";
+    unbind.setAttribute("role", "menuitem");
+    unbind.setAttribute("aria-label", `解绑 ${account.name || account.uuid}`);
+    unbind.title = `解绑 ${account.name || account.uuid}`;
+    unbind.addEventListener("click", () => unbindAccount(account));
+    row.append(option, unbind);
+    list.append(row);
   }
-  els.accountSelect.disabled = !state.authenticated || state.accountSwitching || accounts.length <= 1;
+  const add = createElement("button", "account-menu-add", "＋ 绑定新的游戏账号");
+  add.type = "button";
+  add.setAttribute("role", "menuitem");
+  add.addEventListener("click", () => {
+    closeAccountMenu();
+    openBindingDialog();
+  });
+  els.accountMenuPanel.append(list, add);
+  els.accountMenuButton.disabled = !state.authenticated || state.accountSwitching || state.bindingOperation;
+  if (!state.accountMenuOpen) closeAccountMenu();
 }
 
 function renderProfile() {
   els.playerProfile.classList.toggle("hidden", !state.authenticated || !state.account);
-  renderAccountSelect();
+  renderAccountMenu();
+  renderTabs();
   if (!state.account) return;
 
   const profile = state.playerInfo ?? {};
@@ -614,8 +686,22 @@ async function exportVisualization(format) {
 
 function applyAccountPayload(payload, { source = payload?.playerInfoSource ?? "cache" } = {}) {
   const account = payload?.selectedAccount ?? payload?.account;
-  if (!account) return null;
-  state.accounts = Array.isArray(payload.accounts) && payload.accounts.length ? payload.accounts : [account];
+  state.accounts = Array.isArray(payload?.accounts) ? payload.accounts : account ? [account] : [];
+  state.bindingRequired = Boolean(payload?.bindingRequired) || !account;
+  if (!account) {
+    state.account = null;
+    state.playerInfo = null;
+    state.playerInfoSource = "unavailable";
+    closeVisualization();
+    els.detailDialog.classList.add("hidden");
+    state.detailCache.clear();
+    renderProfile();
+    setRecords([]);
+    setLoading(state.loading);
+    return null;
+  }
+
+  state.bindingRequired = false;
   state.account = account;
   state.playerInfo = payload.cache?.playerInfo ?? null;
   state.playerInfoSource = state.playerInfo ? source : "unavailable";
@@ -623,6 +709,113 @@ function applyAccountPayload(payload, { source = payload?.playerInfoSource ?? "c
   setRecords(payload.cache?.records ?? []);
   setLoading(state.loading);
   return payload.cache;
+}
+
+function openBindingDialog() {
+  closeAccountMenu();
+  els.bindingDialogStatus.textContent = "绑定码仅用于本次绑定，不会保存在本地。";
+  els.bindingDialogStatus.className = "binding-dialog-status";
+  els.bindingDialog.classList.remove("hidden");
+  window.requestAnimationFrame(() => els.bindingCode.focus());
+}
+
+function closeBindingDialog() {
+  if (state.bindingOperation) return;
+  els.bindingDialog.classList.add("hidden");
+  els.bindingCode.value = "";
+  els.bindingDialogStatus.textContent = "绑定码仅用于本次绑定，不会保存在本地。";
+  els.bindingDialogStatus.className = "binding-dialog-status";
+}
+
+function setBindingOperation(loading) {
+  state.bindingOperation = loading;
+  els.bindingCode.disabled = loading;
+  els.bindingSubmitButton.disabled = loading;
+  els.bindingOfficialButton.disabled = loading;
+  els.bindingDialogClose.disabled = loading;
+  setLoading(state.loading);
+  renderAccountMenu();
+}
+
+async function bindAccount() {
+  const bindCode = els.bindingCode.value.trim();
+  if (!bindCode) {
+    els.bindingDialogStatus.textContent = "请输入游戏内通过 /bbind 获取的临时绑定码。";
+    els.bindingDialogStatus.className = "binding-dialog-status error";
+    els.bindingCode.focus();
+    return;
+  }
+
+  setBindingOperation(true);
+  els.bindingDialogStatus.textContent = "正在提交绑定码并验证账号列表…";
+  els.bindingDialogStatus.className = "binding-dialog-status";
+  try {
+    await desktop.cancelFetch();
+    const result = await desktop.bindAccount(bindCode);
+    const uuid = result?.selectedAccount?.uuid || result?.account?.uuid || "";
+    setBindingOperation(false);
+    closeBindingDialog();
+    await loadCurrentAccount({ uuid });
+    setStatus(`已绑定并切换至 ${state.account?.name || "新游戏账号"}。点击“更新”开始抓取战绩。`, "success");
+  } catch (error) {
+    els.bindingDialogStatus.textContent = errorMessage(error);
+    els.bindingDialogStatus.className = "binding-dialog-status error";
+  } finally {
+    setBindingOperation(false);
+  }
+}
+
+async function openOfficialBinding() {
+  closeAccountMenu();
+  closeBindingDialog();
+  setBindingOperation(true);
+  setStatus("已打开官网绑定页，关闭窗口后将刷新游戏账号列表。");
+  try {
+    await desktop.openOfficialBinding();
+    await loadCurrentAccount();
+  } catch (error) {
+    setStatus(`打开官网绑定页失败：${errorMessage(error)}`, "error");
+  } finally {
+    setBindingOperation(false);
+  }
+}
+
+async function unbindAccount(account) {
+  closeAccountMenu();
+  const confirmed = window.confirm(
+    `确定要解绑游戏账号“${account.name || account.uuid}”吗？\n\n本地玩家资料和战绩缓存会保留，未来重新绑定后仍可继续使用。`,
+  );
+  if (!confirmed) return;
+
+  state.accountSwitching = true;
+  setLoading(true);
+  closeVisualization();
+  els.detailDialog.classList.add("hidden");
+  state.detailCache.clear();
+  setStatus(`正在解绑 ${account.name || account.uuid}…`);
+  try {
+    await desktop.cancelFetch();
+    const result = await desktop.unbindAccount(account.uuid);
+    const nextAccount = chooseAccountAfterUnbind({
+      accounts: result.accounts,
+      currentUuid: state.account?.uuid ?? "",
+      unboundUuid: account.uuid,
+    });
+    const nextUuid = nextAccount?.uuid ?? "";
+    await loadCurrentAccount({ uuid: nextUuid });
+    setStatus(
+      result.bindingRequired
+        ? "已解绑最后一个游戏账号，请绑定角色后再开始统计战绩。"
+        : `已解绑 ${account.name || account.uuid}，本地缓存已保留。`,
+      "success",
+    );
+  } catch (error) {
+    setStatus(`解绑失败：${errorMessage(error)}`, "error");
+  } finally {
+    state.accountSwitching = false;
+    setLoading(false);
+    renderProfile();
+  }
 }
 
 async function loadCurrentAccount({ autoUpdate = false, uuid = "" } = {}) {
@@ -633,7 +826,12 @@ async function loadCurrentAccount({ autoUpdate = false, uuid = "" } = {}) {
     const cache = applyAccountPayload(result);
     setLoading(false);
 
-    if (autoUpdate && state.autoUpdateEnabled) {
+    if (result.bindingRequired) {
+      setStatus("当前布吉岛账号尚未绑定游戏角色，请先完成绑定。");
+      return;
+    }
+
+    if (autoUpdate && state.autoUpdateEnabled && state.account?.uuid) {
       await runRecordsAction("update", { automatic: true });
       return;
     }
@@ -658,7 +856,7 @@ async function loadCurrentAccount({ autoUpdate = false, uuid = "" } = {}) {
 async function switchAccount(uuid) {
   const nextUuid = String(uuid || "");
   if (!nextUuid || nextUuid === state.account?.uuid) {
-    renderAccountSelect();
+    renderAccountMenu();
     return;
   }
 
@@ -684,7 +882,7 @@ async function switchAccount(uuid) {
     }
   } catch (error) {
     setStatus(errorMessage(error), "error");
-    renderAccountSelect();
+    renderAccountMenu();
   } finally {
     state.accountSwitching = false;
     setLoading(false);
@@ -710,6 +908,8 @@ async function logout() {
   state.authenticated = false;
   state.accounts = [];
   state.account = null;
+  state.bindingRequired = false;
+  state.accountMenuOpen = false;
   state.playerInfo = null;
   state.playerInfoSource = "unavailable";
   state.detailCache.clear();
@@ -995,7 +1195,9 @@ async function openDetails(record) {
 function bindEvents() {
   desktop.onAccountCache((payload) => {
     const cache = applyAccountPayload(payload, { source: "cache" });
-    if (cache?.records?.length) {
+    if (payload?.bindingRequired) {
+      setStatus("当前布吉岛账号尚未绑定游戏角色，请先完成绑定。");
+    } else if (cache?.records?.length) {
       setStatus(`已载入本地记录 ${cache.records.length} 条，正在刷新玩家资料…`);
     } else {
       setStatus("已读取当前游戏账号，正在刷新玩家资料…");
@@ -1019,7 +1221,27 @@ function bindEvents() {
 
   els.loginButton.addEventListener("click", login);
   els.logoutButton.addEventListener("click", logout);
-  els.accountSelect.addEventListener("change", (event) => switchAccount(event.target.value));
+  els.accountMenuButton.addEventListener("click", () => {
+    if (state.accountMenuOpen) closeAccountMenu();
+    else openAccountMenu();
+  });
+  els.accountMenuButton.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      openAccountMenu();
+    }
+  });
+  els.bindingGuideStart.addEventListener("click", openBindingDialog);
+  els.bindingGuideOfficial.addEventListener("click", openOfficialBinding);
+  els.bindingDialogClose.addEventListener("click", closeBindingDialog);
+  els.bindingDialog.addEventListener("click", (event) => {
+    if (event.target === els.bindingDialog) closeBindingDialog();
+  });
+  els.bindingForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    bindAccount();
+  });
+  els.bindingOfficialButton.addEventListener("click", openOfficialBinding);
   els.updateButton.addEventListener("click", () => runRecordsAction("update"));
   els.refetchButton.addEventListener("click", () => {
     const confirmed = window.confirm(
@@ -1108,7 +1330,18 @@ function bindEvents() {
   els.visualizationExportPng.addEventListener("click", () => exportVisualization("png"));
   els.visualizationExportSvg.addEventListener("click", () => exportVisualization("svg"));
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.visualization.open) closeVisualization();
+    if (event.key !== "Escape") return;
+    if (!els.bindingDialog.classList.contains("hidden")) {
+      closeBindingDialog();
+    } else if (state.accountMenuOpen) {
+      closeAccountMenu();
+      els.accountMenuButton.focus();
+    } else if (state.visualization.open) {
+      closeVisualization();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (state.accountMenuOpen && !els.accountMenu.contains(event.target)) closeAccountMenu();
   });
   if ("ResizeObserver" in window) {
     visualizationResizeObserver = new ResizeObserver(() => {

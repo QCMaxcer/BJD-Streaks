@@ -4,19 +4,27 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ApiError, fetchAllRecords } from "../api.js";
 import { unwrapData } from "../core.js";
-import { loadDesktopAccount, selectDesktopAccount } from "./account.js";
+import {
+  bindDesktopAccount,
+  loadDesktopAccount,
+  selectDesktopAccount,
+  unbindDesktopAccount,
+} from "./account.js";
 import { createCacheStore } from "./cache.js";
 import { createFetchCoordinator } from "./fetch-coordinator.js";
 import { createPreferenceStore } from "./preferences.js";
 
 const SITE_ORIGIN = "https://user.mcbjd.net";
 const STATS_URL = `${SITE_ORIGIN}/#/stats`;
+const BIND_URL = `${SITE_ORIGIN}/#/bind-data`;
 const API_ROOT = `${SITE_ORIGIN}/api/api`;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
 let loginWindow = null;
+let bindingWindow = null;
+let bindingWindowPromise = null;
 let authToken = "";
 let cacheStore = null;
 let preferenceStore = null;
@@ -119,6 +127,53 @@ function openLoginWindow() {
   });
 }
 
+function openOfficialBindingWindow() {
+  if (bindingWindow && !bindingWindow.isDestroyed()) {
+    bindingWindow.focus();
+    return bindingWindowPromise ?? Promise.resolve({ opened: true, alreadyOpen: true });
+  }
+
+  bindingWindowPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      bindingWindowPromise = null;
+      callback(value);
+    };
+    bindingWindow = new BrowserWindow({
+      width: 900,
+      height: 760,
+      title: "布吉岛游戏账号绑定",
+      parent: mainWindow ?? undefined,
+      modal: false,
+      autoHideMenuBar: true,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    bindingWindow.setMenuBarVisibility(false);
+    bindingWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (!isBjdPage(url)) shell.openExternal(url);
+      return { action: "deny" };
+    });
+    bindingWindow.webContents.on("will-navigate", (event, url) => {
+      if (!isBjdPage(url)) event.preventDefault();
+    });
+    bindingWindow.on("closed", () => {
+      bindingWindow = null;
+      settle(resolve, { opened: true, closed: true });
+    });
+    bindingWindow.loadURL(BIND_URL).catch((error) => {
+      settle(reject, error);
+      if (bindingWindow && !bindingWindow.isDestroyed()) bindingWindow.close();
+    });
+  });
+  return bindingWindowPromise;
+}
+
 async function restoreAuthToken() {
   if (authToken) return true;
 
@@ -205,6 +260,13 @@ function registerIpc() {
       onCache: (payload) => event.sender.send("account:cache", payload),
     });
   });
+  ipcMain.handle("binding:bind", async (_event, { bindCode = "" } = {}) => {
+    return bindDesktopAccount({ post: desktopPost, bindCode });
+  });
+  ipcMain.handle("binding:unbind", async (_event, { uuid = "" } = {}) => {
+    return unbindDesktopAccount({ post: desktopPost, uuid });
+  });
+  ipcMain.handle("binding:open-official", () => openOfficialBindingWindow());
 
   ipcMain.handle("preferences:get", () => preferenceStore.read());
   ipcMain.handle("preferences:set", (_event, preferences) => preferenceStore.update(preferences));

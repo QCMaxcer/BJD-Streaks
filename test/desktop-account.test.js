@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  bindDesktopAccount,
+  chooseAccountAfterUnbind,
   loadDesktopAccount,
   normalizeDesktopAccounts,
   selectDesktopAccount,
+  unbindDesktopAccount,
 } from "../src/desktop/account.js";
 
 function createMemoryStore(cached = null) {
@@ -37,6 +40,101 @@ test("selectDesktopAccount rejects uuids outside the current login bindings", ()
     () => selectDesktopAccount({ data: [{ name: "Steve", uuid: "uuid-a" }] }, "uuid-b"),
     /不属于当前登录账号/,
   );
+});
+
+test("loadDesktopAccount returns a normal binding-required state for an empty list", async () => {
+  const cacheEvents = [];
+  const result = await loadDesktopAccount({
+    cacheStore: createMemoryStore(),
+    onCache: (payload) => cacheEvents.push(payload),
+    post: async () => ({ data: [] }),
+  });
+
+  assert.deepEqual(result, {
+    accounts: [],
+    account: null,
+    selectedAccount: null,
+    cache: null,
+    playerInfoSource: "unavailable",
+    bindingRequired: true,
+  });
+  assert.deepEqual(cacheEvents, [result]);
+});
+
+test("bindDesktopAccount trims the code and verifies the new account through binding list", async () => {
+  const requests = [];
+  const responses = [
+    { data: [{ name: "Steve", uuid: "uuid-a" }] },
+    { data: { playerName: "Alex", uuid: "uuid-b" } },
+    { data: [{ name: "Steve", uuid: "uuid-a" }, { name: "Alex", uuid: "uuid-b" }] },
+  ];
+  const result = await bindDesktopAccount({
+    bindCode: "  temporary-code  ",
+    post: async (path, body) => {
+      requests.push([path, body]);
+      return responses.shift();
+    },
+  });
+
+  assert.deepEqual(requests, [
+    ["/binding/list", undefined],
+    ["/binding/bind", { bindCode: "temporary-code" }],
+    ["/binding/list", undefined],
+  ]);
+  assert.equal(result.selectedAccount.uuid, "uuid-b");
+});
+
+test("unbindDesktopAccount validates the uuid and verifies removal without touching cache", async () => {
+  const requests = [];
+  const responses = [
+    { data: [{ name: "Steve", uuid: "uuid-a" }, { name: "Alex", uuid: "uuid-b" }] },
+    { code: 200 },
+    { data: [{ name: "Alex", uuid: "uuid-b" }] },
+  ];
+  const result = await unbindDesktopAccount({
+    uuid: "uuid-a",
+    post: async (path, body) => {
+      requests.push([path, body]);
+      return responses.shift();
+    },
+  });
+
+  assert.deepEqual(requests, [
+    ["/binding/list", undefined],
+    ["/binding/unbind", { UUID: "uuid-a" }],
+    ["/binding/list", undefined],
+  ]);
+  assert.deepEqual(result.accounts, [{ name: "Alex", uuid: "uuid-b" }]);
+  assert.equal(result.bindingRequired, false);
+});
+
+test("unbindDesktopAccount rejects an uuid outside the current login bindings", async () => {
+  await assert.rejects(
+    unbindDesktopAccount({
+      uuid: "uuid-b",
+      post: async () => ({ data: [{ name: "Steve", uuid: "uuid-a" }] }),
+    }),
+    /不属于当前登录账号/,
+  );
+});
+
+test("chooseAccountAfterUnbind keeps current, selects first replacement, or returns null", () => {
+  const accounts = [{ uuid: "uuid-a" }, { uuid: "uuid-b" }];
+  assert.equal(chooseAccountAfterUnbind({
+    accounts,
+    currentUuid: "uuid-a",
+    unboundUuid: "uuid-b",
+  }).uuid, "uuid-a");
+  assert.equal(chooseAccountAfterUnbind({
+    accounts: [{ uuid: "uuid-b" }],
+    currentUuid: "uuid-a",
+    unboundUuid: "uuid-a",
+  }).uuid, "uuid-b");
+  assert.equal(chooseAccountAfterUnbind({
+    accounts: [],
+    currentUuid: "uuid-a",
+    unboundUuid: "uuid-a",
+  }), null);
 });
 
 test("loadDesktopAccount uses the first binding and refreshes player info", async () => {

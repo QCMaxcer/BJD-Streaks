@@ -44,6 +44,22 @@
       </section>
 
       <section class="panel workspace">
+        <section id="bindingGuide" class="binding-guide hidden" aria-labelledby="bindingGuideTitle">
+          <div class="binding-guide-icon" aria-hidden="true">＋</div>
+          <span class="binding-guide-kicker">尚未绑定游戏账号</span>
+          <h2 id="bindingGuideTitle">先绑定角色，再开始统计战绩</h2>
+          <p>绑定码是一次性的临时凭证，桌面程序只会将它提交给布吉岛绑定接口，不会保存。</p>
+          <ol class="binding-steps">
+            <li><strong>进入游戏</strong><span>登录我的世界布吉岛服务器并进入主大厅。</span></li>
+            <li><strong>获取绑定码</strong><span>在游戏聊天框输入 <code>/bbind</code>。</span></li>
+            <li><strong>完成绑定</strong><span>点击下方按钮，在软件内输入临时绑定码。</span></li>
+          </ol>
+          <div class="binding-guide-actions">
+            <button id="bindingGuideStart" class="button primary" type="button">开始绑定</button>
+            <button id="bindingGuideOfficial" class="button" type="button">打开官网绑定页</button>
+          </div>
+        </section>
+
         <section id="playerProfile" class="player-profile hidden" aria-label="玩家资料">
           <div class="player-profile-head">
             <div>
@@ -51,10 +67,14 @@
               <h2 id="playerName">未知玩家</h2>
             </div>
             <div class="player-profile-actions">
-              <label class="account-switcher">
+              <div id="accountMenu" class="account-menu">
                 <span>切换账号</span>
-                <select id="accountSelect" aria-label="切换游戏账号"></select>
-              </label>
+                <button id="accountMenuButton" class="account-menu-button" type="button" aria-haspopup="menu" aria-expanded="false">
+                  <span id="accountMenuLabel">未知玩家</span>
+                  <span aria-hidden="true">⌄</span>
+                </button>
+                <div id="accountMenuPanel" class="account-menu-panel hidden" role="menu" aria-label="游戏账号"></div>
+              </div>
               <span id="profileStatus" class="profile-status">资料暂不可用</span>
             </div>
           </div>
@@ -68,7 +88,7 @@
           </div>
         </section>
 
-        <div class="tab-bar" role="tablist" aria-label="功能板块">
+        <div id="tabBar" class="tab-bar" role="tablist" aria-label="功能板块">
           <button id="streaksTab" class="tab-button active" type="button" data-tab="streaks">连胜统计</button>
           <button id="recordsTab" class="tab-button" type="button" data-tab="records">分类查找</button>
         </div>
@@ -120,6 +140,31 @@
           <button id="detailClose" class="icon-button" type="button" aria-label="关闭">×</button>
         </header>
         <div id="detailBody" class="match-detail-body"></div>
+      </div>
+    </div>
+
+    <div id="bindingDialog" class="dialog binding-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="bindingDialogTitle">
+      <div class="dialog-card binding-dialog-card">
+        <header>
+          <strong id="bindingDialogTitle">绑定新的游戏账号</strong>
+          <button id="bindingDialogClose" class="icon-button" type="button" aria-label="关闭">×</button>
+        </header>
+        <form id="bindingForm" class="binding-dialog-body">
+          <div class="binding-command">
+            <span>在布吉岛游戏主大厅输入</span>
+            <code>/bbind</code>
+            <span>获取临时绑定码，然后粘贴到下方。</span>
+          </div>
+          <label>
+            <span>游戏绑定码</span>
+            <input id="bindingCode" type="text" autocomplete="off" spellcheck="false" placeholder="请输入临时绑定码">
+          </label>
+          <p id="bindingDialogStatus" class="binding-dialog-status">绑定码仅用于本次绑定，不会保存在本地。</p>
+          <div class="binding-dialog-actions">
+            <button id="bindingOfficialButton" class="button" type="button">打开官网绑定页</button>
+            <button id="bindingSubmitButton" class="button primary" type="submit">立即绑定</button>
+          </div>
+        </form>
       </div>
     </div>
 
