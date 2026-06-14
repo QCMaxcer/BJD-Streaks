@@ -769,10 +769,11 @@ async function openOfficialBinding() {
   closeAccountMenu();
   closeBindingDialog();
   setBindingOperation(true);
+  const currentUuid = state.account?.uuid ?? "";
   setStatus("已打开官网绑定页，关闭窗口后将刷新游戏账号列表。");
   try {
     await desktop.openOfficialBinding();
-    await loadCurrentAccount();
+    await loadCurrentAccount({ uuid: currentUuid, fallbackToDefault: true });
   } catch (error) {
     setStatus(`打开官网绑定页失败：${errorMessage(error)}`, "error");
   } finally {
@@ -818,7 +819,11 @@ async function unbindAccount(account) {
   }
 }
 
-async function loadCurrentAccount({ autoUpdate = false, uuid = "" } = {}) {
+async function loadCurrentAccount({
+  autoUpdate = false,
+  uuid = "",
+  fallbackToDefault = false,
+} = {}) {
   setLoading(true);
   setStatus("正在读取当前游戏账号与玩家资料…");
   try {
@@ -847,6 +852,10 @@ async function loadCurrentAccount({ autoUpdate = false, uuid = "" } = {}) {
       setStatus("玩家资料已更新，当前账号暂无本地记录。", "success");
     }
   } catch (error) {
+    if (fallbackToDefault && uuid) {
+      await loadCurrentAccount({ autoUpdate });
+      return;
+    }
     setStatus(errorMessage(error), "error");
   } finally {
     setLoading(false);
@@ -1183,7 +1192,10 @@ async function openDetails(record) {
   try {
     let details = state.detailCache.get(key);
     if (!details) {
-      details = await desktop.getMatchDetails(record);
+      details = await desktop.getMatchDetails({
+        ...record,
+        uuid: state.account?.uuid ?? "",
+      });
       state.detailCache.set(key, details);
     }
     renderMatchDetail(details, record);

@@ -46,7 +46,7 @@ function createMainWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalHttp(url);
     return { action: "deny" };
   });
   mainWindow.setMenuBarVisibility(false);
@@ -59,6 +59,36 @@ function isBjdPage(url) {
   } catch {
     return false;
   }
+}
+
+function isHttpPage(url) {
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function openExternalHttp(url) {
+  if (isHttpPage(url)) shell.openExternal(url);
+}
+
+function hardenBjdWindow(windowRef) {
+  windowRef.webContents.setWindowOpenHandler(({ url }) => {
+    if (!isBjdPage(url)) openExternalHttp(url);
+    return { action: "deny" };
+  });
+  windowRef.webContents.on("will-navigate", (event, url) => {
+    if (!isBjdPage(url)) event.preventDefault();
+  });
+}
+
+async function requireBoundAccount(uuid) {
+  const requestedUuid = String(uuid ?? "").trim();
+  if (!requestedUuid) throw new Error("请先选择游戏账号。");
+  const { account } = selectDesktopAccount(await desktopPost("/binding/list"), requestedUuid);
+  return account;
 }
 
 async function readTokenFromLoginWindow(windowRef) {
@@ -102,6 +132,7 @@ function openLoginWindow() {
       },
     });
     loginWindow.setMenuBarVisibility(false);
+    hardenBjdWindow(loginWindow);
 
     const check = async () => {
       try {
@@ -155,13 +186,7 @@ function openOfficialBindingWindow() {
       },
     });
     bindingWindow.setMenuBarVisibility(false);
-    bindingWindow.webContents.setWindowOpenHandler(({ url }) => {
-      if (!isBjdPage(url)) shell.openExternal(url);
-      return { action: "deny" };
-    });
-    bindingWindow.webContents.on("will-navigate", (event, url) => {
-      if (!isBjdPage(url)) event.preventDefault();
-    });
+    hardenBjdWindow(bindingWindow);
     bindingWindow.on("closed", () => {
       bindingWindow = null;
       settle(resolve, { opened: true, closed: true });
@@ -271,9 +296,13 @@ function registerIpc() {
   ipcMain.handle("preferences:get", () => preferenceStore.read());
   ipcMain.handle("preferences:set", (_event, preferences) => preferenceStore.update(preferences));
 
-  ipcMain.handle("cache:load", async (_event, { uuid }) => cacheStore.read(uuid));
+  ipcMain.handle("cache:load", async (_event, { uuid } = {}) => {
+    const account = await requireBoundAccount(uuid);
+    return cacheStore.read(account.uuid);
+  });
   ipcMain.handle("cache:clear-records", async (_event, { uuid } = {}) => {
-    const cache = await cacheStore.clearRecords(uuid);
+    const account = await requireBoundAccount(uuid);
+    const cache = await cacheStore.clearRecords(account.uuid);
     return { ok: true, cache };
   });
 
@@ -332,6 +361,7 @@ function registerIpc() {
   ipcMain.handle("records:refetch", (event, options = {}) => fetchAndCache(event, options, "refetch"));
 
   ipcMain.handle("match:get", async (_event, record) => {
+    await requireBoundAccount(record?.uuid);
     const payload = await desktopPost("/stats/match", {
       id: record?.matchId,
       date: record?.date,

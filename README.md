@@ -9,7 +9,7 @@ BJD Streaks 用于读取 [布吉岛用户中心](https://user.mcbjd.net/#/stats)
 ### Windows 桌面版
 
 1. 打开 [GitHub Releases](https://github.com/QCMaxcer/BJD-Streaks/releases/latest)。
-2. 下载 `BJD-Streaks-1.0.1.exe`。
+2. 下载 `BJD-Streaks-1.0.2.exe`。
 3. 双击运行，在程序内点击“登录布吉岛”并完成登录。
 4. 如果尚未绑定游戏账号，在游戏主大厅输入 `/bbind` 获取临时绑定码，并按软件内引导完成绑定。
 5. 选择游戏账号，点击“更新”读取最新战绩。

@@ -118,6 +118,21 @@ test("unbindDesktopAccount rejects an uuid outside the current login bindings", 
   );
 });
 
+test("unbindDesktopAccount requires an explicit uuid", async () => {
+  let called = false;
+  await assert.rejects(
+    unbindDesktopAccount({
+      uuid: "",
+      post: async () => {
+        called = true;
+        return { data: [{ name: "Steve", uuid: "uuid-a" }] };
+      },
+    }),
+    /请选择要解绑的游戏账号/,
+  );
+  assert.equal(called, false);
+});
+
 test("chooseAccountAfterUnbind keeps current, selects first replacement, or returns null", () => {
   const accounts = [{ uuid: "uuid-a" }, { uuid: "uuid-b" }];
   assert.equal(chooseAccountAfterUnbind({

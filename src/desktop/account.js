@@ -65,6 +65,7 @@ export async function bindDesktopAccount({ post, bindCode }) {
 }
 
 export async function unbindDesktopAccount({ post, uuid }) {
+  if (!String(uuid ?? "").trim()) throw new Error("请选择要解绑的游戏账号。");
   const { account } = selectDesktopAccount(await post("/binding/list"), uuid);
   await post("/binding/unbind", { UUID: account.uuid });
   const accounts = normalizeDesktopAccounts(await post("/binding/list"));
