@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ApiError, fetchAllRecords } from "../api.js";
-import { unwrapData } from "../core.js";
+import { recordKey, unwrapData } from "../core.js";
 import {
   bindDesktopAccount,
   loadDesktopAccount,
@@ -12,9 +12,18 @@ import {
 } from "./account.js";
 import { createCacheStore } from "./cache.js";
 import { createFetchCoordinator } from "./fetch-coordinator.js";
+import {
+  createInFlightRequestRegistry,
+  runMatchDetailPrefetch,
+} from "./match-detail-scheduler.js";
+import {
+  configureLoginFlowWindow,
+  isBjdPage,
+  isHttpPage,
+  SITE_ORIGIN,
+} from "./navigation.js";
 import { createPreferenceStore } from "./preferences.js";
 
-const SITE_ORIGIN = "https://user.mcbjd.net";
 const STATS_URL = `${SITE_ORIGIN}/#/stats`;
 const BIND_URL = `${SITE_ORIGIN}/#/bind-data`;
 const API_ROOT = `${SITE_ORIGIN}/api/api`;
@@ -29,6 +38,8 @@ let authToken = "";
 let cacheStore = null;
 let preferenceStore = null;
 const fetchCoordinator = createFetchCoordinator();
+const matchDetailsCoordinator = createFetchCoordinator();
+const matchDetailRequests = createInFlightRequestRegistry();
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -53,23 +64,6 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 }
 
-function isBjdPage(url) {
-  try {
-    return new URL(url).origin === SITE_ORIGIN;
-  } catch {
-    return false;
-  }
-}
-
-function isHttpPage(url) {
-  try {
-    const protocol = new URL(url).protocol;
-    return protocol === "https:" || protocol === "http:";
-  } catch {
-    return false;
-  }
-}
-
 function openExternalHttp(url) {
   if (isHttpPage(url)) shell.openExternal(url);
 }
@@ -89,6 +83,17 @@ async function requireBoundAccount(uuid) {
   if (!requestedUuid) throw new Error("请先选择游戏账号。");
   const { account } = selectDesktopAccount(await desktopPost("/binding/list"), requestedUuid);
   return account;
+}
+
+function fetchMatchDetail(account, record, { signal } = {}) {
+  const key = `${account.uuid}::${recordKey(record)}`;
+  return matchDetailRequests.run(key, async () => {
+    const payload = await desktopPost("/stats/match", {
+      id: record?.matchId,
+      date: record?.date,
+    }, { signal });
+    return unwrapData(payload);
+  });
 }
 
 async function readTokenFromLoginWindow(windowRef) {
@@ -132,7 +137,7 @@ function openLoginWindow() {
       },
     });
     loginWindow.setMenuBarVisibility(false);
-    hardenBjdWindow(loginWindow);
+    configureLoginFlowWindow(loginWindow);
 
     const check = async () => {
       try {
@@ -311,10 +316,16 @@ function registerIpc() {
     return { ok: true };
   });
 
+  ipcMain.handle("match-details:cancel", () => {
+    matchDetailsCoordinator.cancel();
+    return { ok: true };
+  });
+
   const fetchAndCache = async (event, options = {}, mode) => {
     const { uuid, playerName = "", cutoffDate = "", pageDelayMs = 100 } = options;
     const { account } = selectDesktopAccount(await desktopPost("/binding/list"), uuid);
     const controller = fetchCoordinator.start();
+    const initialRequestsPerSecond = Math.min(10, Math.max(0.5, 1000 / Math.max(1, pageDelayMs)));
 
     try {
       const knownRecordKeys = mode === "update" ? await cacheStore.readKeys(account.uuid) : [];
@@ -322,6 +333,9 @@ function registerIpc() {
         uuid: account.uuid,
         cutoffDate,
         pageDelayMs,
+        adaptive: true,
+        initialRequestsPerSecond,
+        maxRequestsPerSecond: Math.max(12, initialRequestsPerSecond + 2),
         signal: controller.signal,
         post: desktopPost,
         knownRecordKeys,
@@ -361,12 +375,52 @@ function registerIpc() {
   ipcMain.handle("records:refetch", (event, options = {}) => fetchAndCache(event, options, "refetch"));
 
   ipcMain.handle("match:get", async (_event, record) => {
-    await requireBoundAccount(record?.uuid);
-    const payload = await desktopPost("/stats/match", {
-      id: record?.matchId,
-      date: record?.date,
+    const account = await requireBoundAccount(record?.uuid);
+    const cached = await cacheStore.readMatchDetail(account.uuid, record);
+    if (cached) return cached;
+
+    const raw = await fetchMatchDetail(account, record);
+    await cacheStore.writeMatchDetail({
+      uuid: account.uuid,
+      record,
+      raw,
     });
-    return unwrapData(payload);
+    return raw;
+  });
+
+  ipcMain.handle("match-details:prefetch", async (event, {
+    uuid,
+    records = [],
+    pageDelayMs = 100,
+  } = {}) => {
+    const account = await requireBoundAccount(uuid);
+    const cache = await cacheStore.read(account.uuid);
+    const cachedRecordKeys = new Set((cache?.records ?? []).map((record) => recordKey(record)));
+    const targets = (records ?? []).filter((record) => cachedRecordKeys.has(recordKey(record)));
+    const controller = matchDetailsCoordinator.start();
+    const sendProgress = (progress) => event.sender.send("match-details:progress", {
+      ...progress,
+      uuid: account.uuid,
+    });
+
+    try {
+      const result = await runMatchDetailPrefetch({
+        records: targets,
+        cachedDetails: cache?.matchDetails ?? {},
+        pageDelayMs,
+        signal: controller.signal,
+        fetchDetail: (record, options) => fetchMatchDetail(account, record, options),
+        flushBatch: (details) => cacheStore.writeMatchDetailsBatch({
+          uuid: account.uuid,
+          details,
+        }),
+        onProgress: sendProgress,
+      });
+      const updated = await cacheStore.read(account.uuid);
+      return { ok: true, ...result, cache: updated };
+    } finally {
+      matchDetailsCoordinator.finish(controller);
+    }
   });
 
   ipcMain.handle("visualization:export", async (_event, payload = {}) => {

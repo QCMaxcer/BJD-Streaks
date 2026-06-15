@@ -105,6 +105,10 @@ export async function fetchAllRecords({
   maxPages = 1000,
   duplicatePageLimit = 2,
   pageDelayMs = 1500,
+  adaptive = false,
+  initialRequestsPerSecond = 0,
+  maxRequestsPerSecond = 12,
+  successRateStep = 25,
   rateLimitBaseDelayMs = 5000,
   maxRateLimitRetries = 5,
   sleep = wait,
@@ -118,30 +122,61 @@ export async function fetchAllRecords({
   let duplicatePages = 0;
   let page = 1;
   let rateLimitRetries = 0;
+  let retryCount = 0;
   let scannedCount = 0;
   let knownRecordHits = 0;
+  let consecutiveSuccesses = 0;
+  let requestsPerSecond = adaptive
+    ? Math.min(
+      Math.max(Number(initialRequestsPerSecond) || (pageDelayMs > 0 ? 1000 / pageDelayMs : 10), 0.5),
+      Math.max(Number(maxRequestsPerSecond) || 12, 0.5),
+    )
+    : 0;
+  const maximumRequestsPerSecond = Math.max(
+    requestsPerSecond,
+    Number(maxRequestsPerSecond) || 12,
+  );
+  const progressMetrics = () => ({
+    requestsPerSecond: adaptive ? requestsPerSecond : undefined,
+    retryCount,
+    estimatedRemainingMs: adaptive
+      ? Math.ceil(Math.max(0, maxPages - page + 1) / Math.max(0.5, requestsPerSecond) * 1000)
+      : undefined,
+  });
 
   while (page <= maxPages) {
     if (signal?.aborted) throw new DOMException("操作已取消", "AbortError");
     if (page > 1 && rateLimitRetries === 0) {
+      const waitMs = adaptive ? Math.ceil(1000 / requestsPerSecond) : pageDelayMs;
       onProgress({
         phase: "delay",
         page,
         count: records.length,
         scannedCount,
-        waitMs: pageDelayMs,
+        waitMs,
+        ...progressMetrics(),
       });
-      await sleep(pageDelayMs, signal);
+      if (waitMs > 0) await sleep(waitMs, signal);
     }
-    onProgress({ phase: "request", page, count: records.length, scannedCount });
+    onProgress({ phase: "request", page, count: records.length, scannedCount, ...progressMetrics() });
 
     let payload;
     try {
       payload = await post("/stats/list", { page, uuid }, { signal });
       rateLimitRetries = 0;
+      consecutiveSuccesses += 1;
+      if (
+        adaptive &&
+        consecutiveSuccesses % Math.max(1, Math.floor(successRateStep)) === 0
+      ) {
+        requestsPerSecond = Math.min(maximumRequestsPerSecond, requestsPerSecond + 1);
+      }
     } catch (error) {
       if (!isRateLimitError(error) || rateLimitRetries >= maxRateLimitRetries) throw error;
       rateLimitRetries += 1;
+      retryCount += 1;
+      consecutiveSuccesses = 0;
+      if (adaptive) requestsPerSecond = Math.max(0.5, requestsPerSecond / 2);
       const waitMs = Math.min(rateLimitBaseDelayMs * 2 ** (rateLimitRetries - 1), 60000);
       onProgress({
         phase: "rate-limit",
@@ -151,6 +186,7 @@ export async function fetchAllRecords({
         waitMs,
         attempt: rateLimitRetries,
         maxAttempts: maxRateLimitRetries,
+        ...progressMetrics(),
       });
       await sleep(waitMs, signal);
       continue;
@@ -198,6 +234,7 @@ export async function fetchAllRecords({
       scannedAdded,
       knownRecordHits,
       pageKnownRecordHits,
+      ...progressMetrics(),
     });
 
     if (stopWhenKnownRecord && pageKnownRecordHits > 0) {

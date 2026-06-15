@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("bjdDesktop", {
   refetchRecords: (options) => ipcRenderer.invoke("records:refetch", options),
   cancelFetch: () => ipcRenderer.invoke("records:cancel"),
   getMatchDetails: (record) => ipcRenderer.invoke("match:get", record),
+  prefetchMatchDetails: (options) => ipcRenderer.invoke("match-details:prefetch", options),
+  cancelMatchDetails: () => ipcRenderer.invoke("match-details:cancel"),
   exportVisualization: (payload) => ipcRenderer.invoke("visualization:export", payload),
   onAccountCache: (handler) => {
     const listener = (_event, payload) => handler(payload);
@@ -26,5 +28,10 @@ contextBridge.exposeInMainWorld("bjdDesktop", {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on("records:progress", listener);
     return () => ipcRenderer.removeListener("records:progress", listener);
+  },
+  onMatchDetailsProgress: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on("match-details:progress", listener);
+    return () => ipcRenderer.removeListener("match-details:progress", listener);
   },
 });

@@ -4,8 +4,10 @@ import {
   getLocalDateKey,
   getModeName,
   parseDateInputToKey,
+  recordKey,
   sortRecordsNewestFirst,
 } from "../core.js";
+import { buildMatchAnalytics, filterAnalyticsRecords } from "../match-analytics.js";
 import { normalizeMatchDetail } from "../match-detail.js";
 import {
   addLocalDays,
@@ -17,6 +19,8 @@ import {
   calculateTooltipPosition,
   clampZoomMultiplier,
   DEFAULT_VISUALIZATION_RANGE_PRESET,
+  getVisualizationFixedLabelLayout,
+  resolveVisualizationWheelAction,
 } from "../visualization-layout.js";
 import {
   createVisualizationSvg,
@@ -31,6 +35,12 @@ import { chooseAccountAfterUnbind } from "./account.js";
 const DISPLAY_LIMIT = 300;
 const DEFAULT_CUTOFF_DATE = "2025-01-01";
 const DEFAULT_PAGE_DELAY_SECONDS = 0.1;
+const DEFAULT_ANALYTICS_EXPAND = Object.freeze({
+  items: 5,
+  teammates: 10,
+  bedwarsMaps: 10,
+  skywarsMaps: 10,
+});
 
 const desktop = window.bjdDesktop;
 const state = {
@@ -47,9 +57,21 @@ const state = {
   records: [],
   stats: buildModeStats([]),
   loading: false,
+  analyticsLoading: false,
+  analyticsProgress: null,
+  analyticsExpand: { ...DEFAULT_ANALYTICS_EXPAND },
+  recordsVersion: 0,
+  matchDetailsVersion: 0,
+  analyticsDirty: true,
+  analyticsCache: new Map(),
+  normalizedDetailCache: new Map(),
+  lastAnalyticsModel: null,
   accountSwitching: false,
   filters: { mode: "", category: "", result: "", query: "", from: "", to: "" },
+  analyticsFilters: { mode: "", from: "", to: "" },
   detailCache: new Map(),
+  activeDetailKey: "",
+  matchDetails: {},
   visualization: {
     open: false,
     mode: "all",
@@ -82,8 +104,10 @@ const els = {
   tabBar: document.querySelector("#tabBar"),
   streaksTab: document.querySelector("#streaksTab"),
   recordsTab: document.querySelector("#recordsTab"),
+  analyticsTab: document.querySelector("#analyticsTab"),
   streaksPanel: document.querySelector("#streaksPanel"),
   recordsPanel: document.querySelector("#recordsPanel"),
+  analyticsPanel: document.querySelector("#analyticsPanel"),
   playerProfile: document.querySelector("#playerProfile"),
   playerName: document.querySelector("#playerName"),
   accountMenu: document.querySelector("#accountMenu"),
@@ -108,6 +132,20 @@ const els = {
   queryFilter: document.querySelector("#queryFilter"),
   fromFilter: document.querySelector("#fromFilter"),
   toFilter: document.querySelector("#toFilter"),
+  analyticsMode: document.querySelector("#analyticsMode"),
+  analyticsFrom: document.querySelector("#analyticsFrom"),
+  analyticsTo: document.querySelector("#analyticsTo"),
+  analyticsPrefetchButton: document.querySelector("#analyticsPrefetchButton"),
+  analyticsCancelButton: document.querySelector("#analyticsCancelButton"),
+  analyticsStatus: document.querySelector("#analyticsStatus"),
+  analyticsOverview: document.querySelector("#analyticsOverview"),
+  analyticsTotals: document.querySelector("#analyticsTotals"),
+  analyticsResources: document.querySelector("#analyticsResources"),
+  analyticsItems: document.querySelector("#analyticsItems"),
+  analyticsUpgrades: document.querySelector("#analyticsUpgrades"),
+  analyticsTeammates: document.querySelector("#analyticsTeammates"),
+  analyticsBedwarsMaps: document.querySelector("#analyticsBedwarsMaps"),
+  analyticsSkywarsMaps: document.querySelector("#analyticsSkywarsMaps"),
   detailDialog: document.querySelector("#detailDialog"),
   detailTitle: document.querySelector("#detailTitle"),
   detailBody: document.querySelector("#detailBody"),
@@ -123,6 +161,7 @@ const els = {
   visualizationTitle: document.querySelector("#visualizationTitle"),
   visualizationClose: document.querySelector("#visualizationClose"),
   visualizationMode: document.querySelector("#visualizationMode"),
+  visualizationChartType: document.querySelector("#visualizationChartType"),
   visualizationBarsButton: document.querySelector("#visualizationBarsButton"),
   visualizationLineButton: document.querySelector("#visualizationLineButton"),
   visualizationRange: document.querySelector("#visualizationRange"),
@@ -147,6 +186,25 @@ const els = {
 };
 
 let visualizationResizeObserver = null;
+let analyticsRenderFrame = 0;
+
+function invalidateAnalyticsCache({
+  recordsChanged = false,
+  matchDetailsChanged = false,
+  clearNormalizedDetails = false,
+} = {}) {
+  if (recordsChanged) state.recordsVersion += 1;
+  if (matchDetailsChanged) state.matchDetailsVersion += 1;
+  if (clearNormalizedDetails) state.normalizedDetailCache.clear();
+  state.analyticsCache.clear();
+  state.analyticsDirty = true;
+  state.lastAnalyticsModel = null;
+}
+
+function setMatchDetails(matchDetails, options = {}) {
+  state.matchDetails = matchDetails ?? {};
+  invalidateAnalyticsCache({ matchDetailsChanged: true, ...options });
+}
 
 function createElement(tag, className = "", text) {
   const element = document.createElement(tag);
@@ -180,6 +238,16 @@ function formatNumber(value) {
   return Number.isInteger(number) ? String(number) : number.toFixed(1);
 }
 
+function formatDuration(value) {
+  const totalSeconds = Math.max(0, Math.ceil(Number(value || 0) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return `${minutes} 分 ${seconds} 秒`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} 小时 ${minutes % 60} 分`;
+}
+
 function streakRange(streak) {
   if (!streak?.count) return "暂无连胜";
   return `${formatDate(streak.start?.date, false)} 至 ${formatDate(streak.end?.date, false)}`;
@@ -203,12 +271,23 @@ function renderAuthControls() {
 function renderTabs() {
   const available = state.authenticated && Boolean(state.account?.uuid);
   const isStreaks = state.activeTab === "streaks";
+  const isRecords = state.activeTab === "records";
+  const isAnalytics = state.activeTab === "analytics";
   els.bindingGuide.classList.toggle("hidden", !state.authenticated || !state.bindingRequired);
   els.tabBar.classList.toggle("hidden", !available);
   els.streaksTab.classList.toggle("active", isStreaks);
-  els.recordsTab.classList.toggle("active", !isStreaks);
+  els.recordsTab.classList.toggle("active", isRecords);
+  els.analyticsTab.classList.toggle("active", isAnalytics);
   els.streaksPanel.classList.toggle("hidden", !available || !isStreaks);
-  els.recordsPanel.classList.toggle("hidden", !available || isStreaks);
+  els.recordsPanel.classList.toggle("hidden", !available || !isRecords);
+  els.analyticsPanel.classList.toggle("hidden", !available || !isAnalytics);
+  updateSlidingIndicator(els.tabBar, els.tabBar.querySelector(".tab-button.active"));
+}
+
+function updateSlidingIndicator(container, activeButton) {
+  if (!container || !activeButton) return;
+  container.style.setProperty("--indicator-x", `${activeButton.offsetLeft}px`);
+  container.style.setProperty("--indicator-width", `${activeButton.offsetWidth}px`);
 }
 
 function setLoading(loading) {
@@ -223,6 +302,10 @@ function setLoading(loading) {
   els.accountMenuButton.disabled = !state.authenticated || state.accountSwitching || state.bindingOperation;
   els.bindingGuideStart.disabled = !state.authenticated || state.bindingOperation;
   els.bindingGuideOfficial.disabled = !state.authenticated || state.bindingOperation;
+  if (els.analyticsPrefetchButton) {
+    els.analyticsPrefetchButton.disabled =
+      unavailable || state.analyticsLoading || state.activeTab !== "analytics";
+  }
   els.cancelButton.classList.toggle("hidden", !loading);
 }
 
@@ -418,13 +501,269 @@ function renderRecords() {
   }
 }
 
+function analyticsPlayerNames() {
+  return [
+    state.playerInfo?.name,
+    state.account?.name,
+    state.account?.playerName,
+  ].filter(Boolean);
+}
+
+function analyticsSelection() {
+  return filterAnalyticsRecords(state.records, state.analyticsFilters);
+}
+
+function resetAnalyticsExpand() {
+  state.analyticsExpand = { ...DEFAULT_ANALYTICS_EXPAND };
+}
+
+function expandAnalyticsList(key, step) {
+  state.analyticsExpand[key] = (state.analyticsExpand[key] ?? 0) + step;
+  renderOneAnalyticsRank(key, state.lastAnalyticsModel ?? getAnalyticsModel());
+}
+
+function analyticsMetricClass(tone) {
+  if (tone === "positive") return "metric positive";
+  if (tone === "negative") return "metric negative";
+  if (tone === "neutral") return "metric neutral";
+  return "metric";
+}
+
+function createRankList(container, entries, emptyText, {
+  valueLabel = "",
+  initialLimit = 20,
+  step = 0,
+  onExpand,
+} = {}) {
+  container.replaceChildren();
+  if (!entries.length) {
+    container.append(createElement("div", "empty compact-empty", emptyText));
+    return;
+  }
+  const limit = Math.max(0, initialLimit);
+  entries.slice(0, limit).forEach((entry, index) => {
+    const row = createElement("div", "analytics-rank-row");
+    row.append(
+      createElement("span", "analytics-rank-index", String(index + 1)),
+      createElement("strong", "", entry.label ?? entry.name),
+      createElement("span", "analytics-rank-value", `${formatNumber(entry.value ?? entry.count)}${valueLabel}`),
+    );
+    container.append(row);
+  });
+  if (step > 0 && entries.length > limit) {
+    const remaining = entries.length - limit;
+    const button = createElement(
+      "button",
+      "button compact analytics-expand-button",
+      `展开 ${Math.min(step, remaining)} 个（剩余 ${remaining} 个）`,
+    );
+    button.type = "button";
+    button.addEventListener("click", onExpand);
+    container.append(button);
+  }
+}
+
+function renderAnalyticsFilters() {
+  fillSelect(els.analyticsMode, state.analyticsFilters.mode, [
+    ["", "全部精确模式"],
+    ...state.stats.modes.map((mode) => [mode.mode, mode.modeName]),
+  ]);
+  els.analyticsFrom.value = state.analyticsFilters.from;
+  els.analyticsTo.value = state.analyticsFilters.to;
+}
+
+function analyticsCacheKey() {
+  return JSON.stringify({
+    uuid: state.account?.uuid ?? "",
+    recordsVersion: state.recordsVersion,
+    matchDetailsVersion: state.matchDetailsVersion,
+    playerNames: analyticsPlayerNames().map((name) => String(name).trim().toLowerCase()),
+    filters: state.analyticsFilters,
+  });
+}
+
+function getAnalyticsModel() {
+  const cacheKey = analyticsCacheKey();
+  if (!state.analyticsDirty && state.analyticsCache.has(cacheKey)) {
+    state.lastAnalyticsModel = state.analyticsCache.get(cacheKey);
+    return state.lastAnalyticsModel;
+  }
+
+  const analytics = buildMatchAnalytics({
+    records: state.records,
+    matchDetails: state.matchDetails,
+    playerNames: analyticsPlayerNames(),
+    normalizedDetailCache: state.normalizedDetailCache,
+    ...state.analyticsFilters,
+  });
+  const selection = analyticsSelection();
+  const missingRecords = selection.records.filter((record) => !state.matchDetails[recordKey(record)]);
+
+  const model = { analytics, selection, missingRecords, cacheKey };
+  state.analyticsCache.set(cacheKey, model);
+  if (state.analyticsCache.size > 8) {
+    state.analyticsCache.delete(state.analyticsCache.keys().next().value);
+  }
+  state.analyticsDirty = false;
+  state.lastAnalyticsModel = model;
+  return model;
+}
+
+function renderAnalyticsSummary(model) {
+  const { analytics, missingRecords } = model;
+  const progress = state.analyticsProgress;
+  els.analyticsStatus.textContent = state.analyticsLoading && progress
+    ? `已完成 ${progress.completed}/${progress.total}，${progress.requestsPerSecond.toFixed(1)} 次/秒，并发 ${progress.concurrency}，预计剩余 ${formatDuration(progress.estimatedRemainingMs)}`
+    : state.analyticsLoading
+      ? "正在扫描本地缓存并准备补全详情…"
+      : `已缓存详情 ${analytics.matchedDetails + analytics.unmatchedPlayer} 局，缺失 ${analytics.missingDetails} 局`;
+  els.analyticsPrefetchButton.disabled =
+    state.analyticsLoading ||
+    state.loading ||
+    !state.account?.uuid ||
+    missingRecords.length === 0;
+  els.analyticsCancelButton.classList.toggle("hidden", !state.analyticsLoading);
+
+  els.analyticsOverview.replaceChildren(
+    createElement("span", "", `范围内对局 ${analytics.totalRecords} 局`),
+    createElement("span", "", `已识别本人 ${analytics.matchedDetails} 局`),
+    createElement("span", "", `缺失详情 ${analytics.missingDetails} 局`),
+    createElement("span", "", `未识别当前玩家 ${analytics.unmatchedPlayer} 局`),
+    createElement("span", "", `无效日期 ${analytics.invalidDateCount} 条`),
+    createElement("span", "", `未识别地图 ${analytics.unknownMapCount} 局`),
+    createElement("span", "", `其它模式地图未统计 ${analytics.ignoredMapCategoryCount} 局`),
+  );
+
+  els.analyticsTotals.replaceChildren();
+  for (const [label, value, tone] of [
+    ["总击败", analytics.totals.kills, "positive"],
+    ["最终击败", analytics.totals.finalKills, "positive"],
+    ["死亡", analytics.totals.deaths, "negative"],
+    ["最终死亡", analytics.totals.finalDeaths, "negative"],
+    ["伤害", analytics.totals.damageDealt, "positive"],
+    ["承伤", analytics.totals.damageTaken, "negative"],
+    ["放置方块", analytics.totals.blocksPlaced, "neutral"],
+    ["破坏方块", analytics.totals.blocksBroken, "neutral"],
+  ]) {
+    const item = createElement("div", analyticsMetricClass(tone));
+    item.append(createElement("span", "", label), createElement("strong", "", formatNumber(value)));
+    els.analyticsTotals.append(item);
+  }
+}
+
+function renderOneAnalyticsRank(key, model) {
+  const analytics = model?.analytics;
+  if (!analytics) return;
+  const configs = {
+    resources: {
+      container: els.analyticsResources,
+      entries: analytics.resources,
+      emptyText: "暂无资源收集数据。",
+    },
+    items: {
+      container: els.analyticsItems,
+      entries: analytics.items,
+      emptyText: "暂无物品使用数据。",
+      options: {
+        initialLimit: state.analyticsExpand.items,
+        step: 5,
+        onExpand: () => expandAnalyticsList("items", 5),
+      },
+    },
+    upgrades: {
+      container: els.analyticsUpgrades,
+      entries: analytics.upgrades,
+      emptyText: "暂无升级数据。",
+    },
+    teammates: {
+      container: els.analyticsTeammates,
+      entries: analytics.teammates,
+      emptyText: "暂无可识别的队友数据。",
+      options: {
+        valueLabel: " 局",
+        initialLimit: state.analyticsExpand.teammates,
+        step: 10,
+        onExpand: () => expandAnalyticsList("teammates", 10),
+      },
+    },
+    bedwarsMaps: {
+      container: els.analyticsBedwarsMaps,
+      entries: analytics.maps.bedwars,
+      emptyText: "暂无起床战争地图数据。",
+      options: {
+        valueLabel: " 局",
+        initialLimit: state.analyticsExpand.bedwarsMaps,
+        step: 10,
+        onExpand: () => expandAnalyticsList("bedwarsMaps", 10),
+      },
+    },
+    skywarsMaps: {
+      container: els.analyticsSkywarsMaps,
+      entries: analytics.maps.skywars,
+      emptyText: "暂无空岛相关地图数据。",
+      options: {
+        valueLabel: " 局",
+        initialLimit: state.analyticsExpand.skywarsMaps,
+        step: 10,
+        onExpand: () => expandAnalyticsList("skywarsMaps", 10),
+      },
+    },
+  };
+  const config = configs[key];
+  if (!config) return;
+  createRankList(config.container, config.entries, config.emptyText, config.options);
+}
+
+function renderAnalyticsRanks(model) {
+  for (const key of ["resources", "items", "upgrades", "teammates", "bedwarsMaps", "skywarsMaps"]) {
+    renderOneAnalyticsRank(key, model);
+  }
+}
+
+function renderAnalytics() {
+  if (analyticsRenderFrame) {
+    window.cancelAnimationFrame(analyticsRenderFrame);
+    analyticsRenderFrame = 0;
+  }
+  renderAnalyticsFilters();
+  const model = getAnalyticsModel();
+  renderAnalyticsSummary(model);
+  renderAnalyticsRanks(model);
+}
+
+function scheduleAnalyticsRender() {
+  if (analyticsRenderFrame) window.cancelAnimationFrame(analyticsRenderFrame);
+  renderAnalyticsFilters();
+  if (!state.analyticsLoading) {
+    els.analyticsStatus.textContent = "正在统计本地详情…";
+  }
+  analyticsRenderFrame = window.requestAnimationFrame(() => {
+    analyticsRenderFrame = 0;
+    if (state.activeTab === "analytics") {
+      renderAnalytics();
+    } else {
+      state.analyticsDirty = true;
+    }
+  });
+}
+
+function renderAnalyticsIfVisible() {
+  if (state.activeTab === "analytics") {
+    scheduleAnalyticsRender();
+  } else {
+    state.analyticsDirty = true;
+  }
+}
+
 function setRecords(records) {
   state.records = sortRecordsNewestFirst(records);
+  invalidateAnalyticsCache({ recordsChanged: true });
   state.stats = buildModeStats(state.records);
   renderOverall();
   renderModes();
   renderFilters();
   renderRecords();
+  renderAnalyticsIfVisible();
   els.visualizeAllButton.disabled = state.records.length === 0;
   if (state.visualization.open) renderVisualization();
 }
@@ -496,12 +835,16 @@ function renderVisualizationFixedLabels(model) {
     chartType: state.visualization.chartType,
     playerName: visualizationPlayerName(),
   });
+  const layout = getVisualizationFixedLabelLayout(state.visualization.chartType);
   els.visualizationChartTitle.textContent = labels.title;
   els.visualizationChartSubtitle.textContent = labels.subtitle;
   els.visualizationTrackLabel.textContent = labels.trackLabel;
+  els.visualizationTrackLabel.style.top = `${layout.trackTop}px`;
   els.visualizationPrimaryAxisLabel.textContent = labels.primaryAxisLabel;
+  els.visualizationPrimaryAxisLabel.style.top = `${layout.primaryTop}px`;
   els.visualizationPrimaryAxisLabel.style.color = state.visualization.chartType === "line" ? "#0969da" : "#16a34a";
   els.visualizationSecondaryAxisLabel.textContent = labels.secondaryAxisLabel;
+  els.visualizationSecondaryAxisLabel.style.top = `${layout.secondaryTop}px`;
   els.visualizationSecondaryAxisLabel.classList.toggle("hidden", !labels.secondaryAxisLabel);
 }
 
@@ -515,6 +858,14 @@ function hideVisualizationTooltip() {
 
 function bindVisualizationHover(chart) {
   const { svg, hits } = chart;
+  let activeSpanElement = null;
+  const setActiveSpan = (hit) => {
+    const nextElement = hit?.kind === "span" ? hit.element : null;
+    if (nextElement === activeSpanElement) return;
+    activeSpanElement?.classList.remove("is-hovered");
+    nextElement?.classList.add("is-hovered");
+    activeSpanElement = nextElement;
+  };
   svg.addEventListener("pointermove", (event) => {
     if (!hits.length) return;
     const rect = svg.getBoundingClientRect();
@@ -536,6 +887,7 @@ function bindVisualizationHover(chart) {
         if (Math.abs(hit.x - viewX) < Math.abs(nearest.x - viewX)) nearest = hit;
       }
     }
+    setActiveSpan(nearest);
     els.visualizationTooltip.textContent = nearest.text;
     els.visualizationTooltip.classList.remove("hidden");
     const position = calculateTooltipPosition({
@@ -549,7 +901,10 @@ function bindVisualizationHover(chart) {
     els.visualizationTooltip.style.left = `${position.left}px`;
     els.visualizationTooltip.style.top = `${position.top}px`;
   });
-  svg.addEventListener("pointerleave", hideVisualizationTooltip);
+  svg.addEventListener("pointerleave", () => {
+    setActiveSpan(null);
+    hideVisualizationTooltip();
+  });
 }
 
 function renderVisualization({
@@ -581,6 +936,7 @@ function renderVisualization({
     els.visualizationTo.disabled = state.visualization.rangePreset !== "custom";
     els.visualizationBarsButton.classList.toggle("active", state.visualization.chartType === "bars");
     els.visualizationLineButton.classList.toggle("active", state.visualization.chartType === "line");
+    updateSlidingIndicator(els.visualizationChartType, els.visualizationChartType.querySelector("button.active"));
     els.visualizationLocateBest.disabled = model.best.count === 0;
     els.visualizationExportPng.disabled = model.validCount === 0;
     els.visualizationExportSvg.disabled = model.validCount === 0;
@@ -686,15 +1042,22 @@ async function exportVisualization(format) {
 
 function applyAccountPayload(payload, { source = payload?.playerInfoSource ?? "cache" } = {}) {
   const account = payload?.selectedAccount ?? payload?.account;
+  const previousUuid = state.account?.uuid ?? "";
+  const nextUuid = account?.uuid ?? "";
+  if (previousUuid !== nextUuid) resetAnalyticsExpand();
   state.accounts = Array.isArray(payload?.accounts) ? payload.accounts : account ? [account] : [];
   state.bindingRequired = Boolean(payload?.bindingRequired) || !account;
   if (!account) {
     state.account = null;
     state.playerInfo = null;
     state.playerInfoSource = "unavailable";
+    state.analyticsLoading = false;
+    state.analyticsProgress = null;
     closeVisualization();
     els.detailDialog.classList.add("hidden");
     state.detailCache.clear();
+    state.activeDetailKey = "";
+    setMatchDetails({}, { clearNormalizedDetails: true });
     renderProfile();
     setRecords([]);
     setLoading(state.loading);
@@ -703,8 +1066,11 @@ function applyAccountPayload(payload, { source = payload?.playerInfoSource ?? "c
 
   state.bindingRequired = false;
   state.account = account;
+  state.analyticsLoading = false;
+  state.analyticsProgress = null;
   state.playerInfo = payload.cache?.playerInfo ?? null;
   state.playerInfoSource = state.playerInfo ? source : "unavailable";
+  setMatchDetails(payload.cache?.matchDetails ?? {}, { clearNormalizedDetails: previousUuid !== nextUuid });
   renderProfile();
   setRecords(payload.cache?.records ?? []);
   setLoading(state.loading);
@@ -789,13 +1155,17 @@ async function unbindAccount(account) {
   if (!confirmed) return;
 
   state.accountSwitching = true;
+  state.analyticsLoading = false;
+  state.analyticsProgress = null;
   setLoading(true);
   closeVisualization();
   els.detailDialog.classList.add("hidden");
   state.detailCache.clear();
+  state.activeDetailKey = "";
   setStatus(`正在解绑 ${account.name || account.uuid}…`);
   try {
     await desktop.cancelFetch();
+    await desktop.cancelMatchDetails();
     const result = await desktop.unbindAccount(account.uuid);
     const nextAccount = chooseAccountAfterUnbind({
       accounts: result.accounts,
@@ -870,13 +1240,17 @@ async function switchAccount(uuid) {
   }
 
   state.accountSwitching = true;
+  state.analyticsLoading = false;
+  state.analyticsProgress = null;
   setLoading(true);
   closeVisualization();
   els.detailDialog.classList.add("hidden");
   state.detailCache.clear();
+  state.activeDetailKey = "";
   setStatus("正在切换游戏账号…");
   try {
     await desktop.cancelFetch();
+    await desktop.cancelMatchDetails();
     const result = await desktop.loadAccount(nextUuid);
     const cache = applyAccountPayload(result);
     if (result.profileError) {
@@ -921,7 +1295,11 @@ async function logout() {
   state.accountMenuOpen = false;
   state.playerInfo = null;
   state.playerInfoSource = "unavailable";
+  state.analyticsLoading = false;
+  state.analyticsProgress = null;
   state.detailCache.clear();
+  state.activeDetailKey = "";
+  setMatchDetails({}, { clearNormalizedDetails: true });
   renderAuthControls();
   renderProfile();
   setRecords([]);
@@ -929,9 +1307,7 @@ async function logout() {
   setStatus("已退出登录，并清理程序内的布吉岛登录态。");
 }
 
-function readFetchOptions() {
-  const cutoffDate = parseDateInputToKey(els.cutoffDate.value);
-  if (!cutoffDate) throw new Error("请选择有效截止日期。");
+function readPageDelayMs() {
   const delaySeconds = Number(els.pageDelay.value);
   const pageDelayMs = Math.round(
     Math.min(
@@ -943,6 +1319,13 @@ function readFetchOptions() {
     ) * 1000,
   );
   els.pageDelay.value = String(pageDelayMs / 1000);
+  return pageDelayMs;
+}
+
+function readFetchOptions() {
+  const cutoffDate = parseDateInputToKey(els.cutoffDate.value);
+  if (!cutoffDate) throw new Error("请选择有效截止日期。");
+  const pageDelayMs = readPageDelayMs();
   return {
     uuid: state.account?.uuid ?? "",
     playerName: state.account?.name ?? "",
@@ -995,10 +1378,55 @@ async function clearRecords() {
   if (!state.account?.uuid) return;
   try {
     await desktop.clearRecords(state.account.uuid);
+    setMatchDetails({}, { clearNormalizedDetails: true });
+    state.detailCache.clear();
     setRecords([]);
     setStatus("已清空当前账号的战绩记录，玩家资料已保留。");
   } catch (error) {
     setStatus(errorMessage(error), "error");
+  }
+}
+
+async function prefetchAnalyticsDetails() {
+  if (!state.account?.uuid || state.analyticsLoading) return;
+  const actionUuid = state.account.uuid;
+  const selection = analyticsSelection();
+  const missingRecords = selection.records.filter((record) => !state.matchDetails[recordKey(record)]);
+  if (!missingRecords.length) return;
+
+  state.analyticsLoading = true;
+  state.analyticsProgress = null;
+  renderAnalytics();
+  setStatus(`正在扫描本地缓存，准备补全 ${missingRecords.length} 局缺失详情…`);
+  try {
+    const result = await desktop.prefetchMatchDetails({
+      uuid: actionUuid,
+      records: selection.records,
+      pageDelayMs: readPageDelayMs(),
+    });
+    if (state.account?.uuid !== actionUuid) return;
+    setMatchDetails(result.cache?.matchDetails ?? state.matchDetails);
+    renderAnalyticsIfVisible();
+    setStatus(
+      `对局详情补全完成：本地已有 ${result.cached} 局，内嵌详情 ${result.embedded} 局，请求补全 ${result.requested} 局，限流重试 ${result.retryCount} 次。`,
+      "success",
+    );
+  } catch (error) {
+    if (state.account?.uuid !== actionUuid) return;
+    if (error?.name === "AbortError") {
+      const cache = await desktop.loadCache(actionUuid);
+      setMatchDetails(cache?.matchDetails ?? state.matchDetails);
+      renderAnalyticsIfVisible();
+      setStatus("已取消详情补全，已完成的详情已保存，可稍后继续。");
+    } else {
+      setStatus(errorMessage(error), "error");
+    }
+  } finally {
+    if (state.account?.uuid === actionUuid) {
+      state.analyticsLoading = false;
+      state.analyticsProgress = null;
+      renderAnalyticsIfVisible();
+    }
   }
 }
 
@@ -1051,6 +1479,7 @@ function createTeamCard(team) {
     ["击败", team.kills],
     ["最终击败", team.finalKills],
     ["死亡", team.deaths],
+    ["最终死亡", team.finalDeaths],
     ["方块", `${formatNumber(team.blocksPlaced)}/${formatNumber(team.blocksBroken)}`],
   ]) {
     const chip = createElement("span", "match-team-stat");
@@ -1077,6 +1506,7 @@ function createPlayerCard(player, teams) {
     createDetailStat("击败", player.kills),
     createDetailStat("最终击败", player.finalKills),
     createDetailStat("死亡次数", player.deaths),
+    createDetailStat("最终死亡", player.finalDeaths),
   );
 
   const combat = createElement("div", "match-subcard");
@@ -1126,6 +1556,38 @@ function createPlayerCard(player, teams) {
 
 function renderDetailMessage(message, kind = "") {
   els.detailBody.replaceChildren(createElement("div", `match-detail-message ${kind}`.trim(), message));
+}
+
+function renderDetailLoading(record) {
+  const root = createElement("div", "match-detail-view");
+  const hero = createElement("section", "match-hero loading");
+  const heroText = createElement("div", "match-hero-text");
+  heroText.append(
+    createElement("span", "match-hero-kicker", getModeName(record.type)),
+    createElement("h2", "", "正在加载对局详情"),
+  );
+  const meta = createElement("div", "match-hero-meta");
+  for (const text of [
+    formatDate(record.date),
+    record.matchId ? `ID ${record.matchId}` : "",
+    resultLabel(record.win),
+  ].filter(Boolean)) {
+    meta.append(createElement("span", "", text));
+  }
+  heroText.append(meta);
+  hero.append(
+    heroText,
+    createElement(
+      "strong",
+      `match-result-badge ${record.win === true ? "win" : record.win === false ? "loss" : "unknown"}`,
+      resultLabel(record.win),
+    ),
+  );
+  root.append(
+    hero,
+    createElement("div", "match-detail-message", "正在读取服务器对局详情，加载完成后会自动显示。"),
+  );
+  els.detailBody.replaceChildren(root);
 }
 
 function renderMatchDetail(details, record) {
@@ -1186,20 +1648,38 @@ function renderMatchDetail(details, record) {
 
 async function openDetails(record) {
   const key = `${record.matchId}::${record.date}`;
+  const actionUuid = state.account?.uuid ?? "";
+  const existingPersistedDetail = state.matchDetails[key]?.raw;
+  state.activeDetailKey = key;
   els.detailTitle.textContent = `${getModeName(record.type)} · ${resultLabel(record.win)}`;
-  renderDetailMessage("正在读取对局详情…");
+  renderDetailLoading(record);
   els.detailDialog.classList.remove("hidden");
   try {
-    let details = state.detailCache.get(key);
+    let details = state.detailCache.get(key) ?? existingPersistedDetail;
     if (!details) {
       details = await desktop.getMatchDetails({
         ...record,
-        uuid: state.account?.uuid ?? "",
+        uuid: actionUuid,
       });
+      if (state.activeDetailKey !== key) return;
+      if (state.account?.uuid !== actionUuid) return;
       state.detailCache.set(key, details);
+    } else {
+      state.detailCache.set(key, details);
+    }
+    if (state.activeDetailKey !== key) return;
+    if (state.account?.uuid !== actionUuid) return;
+    if (existingPersistedDetail !== details) {
+      state.matchDetails[key] = {
+        fetchedAt: new Date().toISOString(),
+        raw: details,
+      };
+      invalidateAnalyticsCache({ matchDetailsChanged: true });
+      renderAnalyticsIfVisible();
     }
     renderMatchDetail(details, record);
   } catch (error) {
+    if (state.activeDetailKey !== key) return;
     renderDetailMessage(errorMessage(error), "error");
   }
 }
@@ -1218,17 +1698,44 @@ function bindEvents() {
 
   desktop.onRecordsProgress((progress) => {
     if (progress.uuid && progress.uuid !== state.account?.uuid) return;
+    const speed = progress.requestsPerSecond
+      ? `，速度 ${progress.requestsPerSecond.toFixed(1)} 次/秒`
+      : "";
+    const retry = progress.retryCount ? `，限流重试 ${progress.retryCount} 次` : "";
     if (progress.phase === "delay") {
-      setStatus(`已扫描 ${progress.scannedCount} 条，保留 ${progress.count} 条；等待 ${(progress.waitMs / 1000).toFixed(1)} 秒后读取第 ${progress.page} 页…`);
+      setStatus(`已扫描 ${progress.scannedCount} 条，保留 ${progress.count} 条；等待 ${(progress.waitMs / 1000).toFixed(1)} 秒后读取第 ${progress.page} 页${speed}${retry}…`);
       return;
     }
     if (progress.phase === "rate-limit") {
-      setStatus(`服务器提示请求频繁，等待 ${Math.ceil(progress.waitMs / 1000)} 秒后重试第 ${progress.page} 页（${progress.attempt}/${progress.maxAttempts}）。`);
+      setStatus(`服务器提示请求频繁，等待 ${Math.ceil(progress.waitMs / 1000)} 秒后重试第 ${progress.page} 页（${progress.attempt}/${progress.maxAttempts}）${speed}${retry}。`);
       return;
     }
     const suffix = progress.phase === "received" ? `，新增 ${progress.added} 条` : "";
     const known = progress.pageKnownRecordHits ? `，命中缓存 ${progress.pageKnownRecordHits} 条` : "";
-    setStatus(`正在读取第 ${progress.page} 页，已扫描 ${progress.scannedCount} 条，保留 ${progress.count} 条${suffix}${known}`);
+    setStatus(`正在读取第 ${progress.page} 页，已扫描 ${progress.scannedCount} 条，保留 ${progress.count} 条${suffix}${known}${speed}${retry}`);
+  });
+
+  desktop.onMatchDetailsProgress?.((progress) => {
+    if (progress.uuid && progress.uuid !== state.account?.uuid) return;
+    state.analyticsProgress = progress;
+    const metrics = `已完成 ${progress.completed}/${progress.total}，${progress.requestsPerSecond.toFixed(1)} 次/秒，并发 ${progress.concurrency}`;
+    const eta = `，预计剩余 ${formatDuration(progress.estimatedRemainingMs)}`;
+    if (state.analyticsLoading) {
+      els.analyticsStatus.textContent = `${metrics}${eta}，限流重试 ${progress.retryCount} 次`;
+    }
+    if (progress.phase === "rate-limit") {
+      setStatus(`服务器提示请求频繁，等待 ${Math.ceil(progress.waitMs / 1000)} 秒后重试；${metrics}，已降速。`);
+      return;
+    }
+    if (progress.phase === "retry") {
+      setStatus(`详情请求暂时失败，等待 ${Math.ceil(progress.waitMs / 1000)} 秒后重试；${metrics}${eta}。`);
+      return;
+    }
+    if (progress.phase === "done") {
+      setStatus(`详情补全请求完成；${metrics}。`);
+      return;
+    }
+    setStatus(`正在补全对局详情；${metrics}${eta}。`);
   });
 
   els.loginButton.addEventListener("click", login);
@@ -1280,10 +1787,38 @@ function bindEvents() {
     state.activeTab = "records";
     renderTabs();
   });
+  els.analyticsTab.addEventListener("click", () => {
+    state.activeTab = "analytics";
+    renderTabs();
+    renderAnalyticsIfVisible();
+  });
+  els.analyticsMode.addEventListener("change", (event) => {
+    state.analyticsFilters.mode = event.target.value;
+    resetAnalyticsExpand();
+    renderAnalyticsIfVisible();
+  });
+  els.analyticsFrom.addEventListener("change", (event) => {
+    state.analyticsFilters.from = event.target.value;
+    resetAnalyticsExpand();
+    renderAnalyticsIfVisible();
+  });
+  els.analyticsTo.addEventListener("change", (event) => {
+    state.analyticsFilters.to = event.target.value;
+    resetAnalyticsExpand();
+    renderAnalyticsIfVisible();
+  });
+  els.analyticsPrefetchButton.addEventListener("click", prefetchAnalyticsDetails);
+  els.analyticsCancelButton.addEventListener("click", () => desktop.cancelMatchDetails());
   els.visualizeAllButton.addEventListener("click", () => openVisualization("all"));
-  els.detailClose.addEventListener("click", () => els.detailDialog.classList.add("hidden"));
+  els.detailClose.addEventListener("click", () => {
+    state.activeDetailKey = "";
+    els.detailDialog.classList.add("hidden");
+  });
   els.detailDialog.addEventListener("click", (event) => {
-    if (event.target === els.detailDialog) els.detailDialog.classList.add("hidden");
+    if (event.target === els.detailDialog) {
+      state.activeDetailKey = "";
+      els.detailDialog.classList.add("hidden");
+    }
   });
   els.visualizationClose.addEventListener("click", closeVisualization);
   els.visualizationDialog.addEventListener("click", (event) => {
@@ -1328,16 +1863,34 @@ function bindEvents() {
     renderVisualization({ preserveScroll: true });
   });
   els.visualizationChartScroller.addEventListener("wheel", (event) => {
-    if (!event.ctrlKey || !state.visualization.open) return;
-    event.preventDefault();
-    const rect = els.visualizationChartScroller.getBoundingClientRect();
-    const pointerOffset = Math.max(0, event.clientX - rect.left);
-    const scrollWidth = Math.max(1, els.visualizationChartScroller.scrollWidth);
-    const scrollRatio = (els.visualizationChartScroller.scrollLeft + pointerOffset) / scrollWidth;
-    const factor = event.deltaY < 0 ? 1.16 : 1 / 1.16;
-    state.visualization.zoomMultiplier = clampZoomMultiplier(state.visualization.zoomMultiplier * factor);
-    renderVisualization({ scrollRatio, pointerOffset });
-  });
+    if (!state.visualization.open) return;
+    const action = resolveVisualizationWheelAction({
+      ctrlKey: event.ctrlKey,
+      scrollWidth: els.visualizationChartScroller.scrollWidth,
+      clientWidth: els.visualizationChartScroller.clientWidth,
+    });
+    switch (action) {
+      case "scroll-x": {
+        event.preventDefault();
+        const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+        els.visualizationChartScroller.scrollLeft += delta;
+        break;
+      }
+      case "zoom": {
+        event.preventDefault();
+        const rect = els.visualizationChartScroller.getBoundingClientRect();
+        const pointerOffset = Math.max(0, event.clientX - rect.left);
+        const scrollWidth = Math.max(1, els.visualizationChartScroller.scrollWidth);
+        const scrollRatio = (els.visualizationChartScroller.scrollLeft + pointerOffset) / scrollWidth;
+        const factor = event.deltaY < 0 ? 1.16 : 1 / 1.16;
+        state.visualization.zoomMultiplier = clampZoomMultiplier(state.visualization.zoomMultiplier * factor);
+        renderVisualization({ scrollRatio, pointerOffset });
+        break;
+      }
+      default:
+        break;
+    }
+  }, { passive: false });
   els.visualizationLocateBest.addEventListener("click", locateBestStreak);
   els.visualizationExportPng.addEventListener("click", () => exportVisualization("png"));
   els.visualizationExportSvg.addEventListener("click", () => exportVisualization("svg"));
@@ -1354,6 +1907,10 @@ function bindEvents() {
   });
   document.addEventListener("click", (event) => {
     if (state.accountMenuOpen && !els.accountMenu.contains(event.target)) closeAccountMenu();
+  });
+  window.addEventListener("resize", () => {
+    updateSlidingIndicator(els.tabBar, els.tabBar.querySelector(".tab-button.active"));
+    updateSlidingIndicator(els.visualizationChartType, els.visualizationChartType.querySelector("button.active"));
   });
   if ("ResizeObserver" in window) {
     visualizationResizeObserver = new ResizeObserver(() => {

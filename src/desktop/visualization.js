@@ -161,12 +161,19 @@ function renderStreakTrack(svg, model, width, { showAxisLabels = true } = {}) {
     "stroke-width": 2,
   }));
 
-  for (const span of model.spans) {
+  for (const [index, span] of model.spans.entries()) {
     const startX = xScale(model, width, span.visibleStart);
     const endX = xScale(model, width, span.visibleEnd);
     const left = Math.min(startX, endX);
     const right = Math.max(startX, endX);
     const style = spanStyle(span.role);
+    const spanId = `streak-span-${index}`;
+    const spanGroup = svgElement("g", {
+      class: "visualization-span",
+      "data-span-id": spanId,
+      "data-span-role": span.role,
+      style: `color: ${style.stroke}; --span-width: ${style.width}px; --span-hover-width: ${style.width + 2}px;`,
+    });
     const label = span.role === "current-best"
       ? `当前最高 ${span.count}`
       : span.role === "best"
@@ -176,7 +183,9 @@ function renderStreakTrack(svg, model, width, { showAxisLabels = true } = {}) {
           : "";
 
     if (style.outline) {
-      svg.append(svgElement("line", {
+      spanGroup.append(svgElement("line", {
+        class: "visualization-span-mark visualization-span-line visualization-span-outline",
+        style: `--span-width: ${style.width + 5}px; --span-hover-width: ${style.width + 7}px;`,
         x1: startX,
         x2: Math.max(startX, endX),
         y1: y,
@@ -187,7 +196,8 @@ function renderStreakTrack(svg, model, width, { showAxisLabels = true } = {}) {
       }));
     }
     if (Math.abs(endX - startX) < 2) {
-      svg.append(svgElement("circle", {
+      spanGroup.append(svgElement("circle", {
+        class: "visualization-span-mark visualization-span-point",
         cx: startX,
         cy: y,
         r: span.role === "other" ? 4 : 6,
@@ -196,7 +206,8 @@ function renderStreakTrack(svg, model, width, { showAxisLabels = true } = {}) {
         "stroke-width": style.outline ? 3 : 1,
       }));
     } else {
-      svg.append(svgElement("line", {
+      spanGroup.append(svgElement("line", {
+        class: "visualization-span-mark visualization-span-line",
         x1: startX,
         x2: endX,
         y1: y,
@@ -207,26 +218,29 @@ function renderStreakTrack(svg, model, width, { showAxisLabels = true } = {}) {
       }));
     }
     if (span.leftTruncated) {
-      appendText(svg, "‹", CHART_LEFT - 10, y + 6, { fill: style.stroke, "font-size": 20, "font-weight": 700 });
+      appendText(spanGroup, "‹", CHART_LEFT - 10, y + 6, { fill: style.stroke, "font-size": 20, "font-weight": 700 });
     }
     if (span.rightTruncated) {
-      appendText(svg, "›", width - CHART_RIGHT + 4, y + 6, {
+      appendText(spanGroup, "›", width - CHART_RIGHT + 4, y + 6, {
         fill: style.stroke,
         "font-size": 20,
         "font-weight": 700,
       });
     }
     if (label) {
-      appendText(svg, label, Math.max(CHART_LEFT + 55, Math.min(width - CHART_RIGHT - 65, (startX + endX) / 2)), y - 16, {
+      appendText(spanGroup, label, Math.max(CHART_LEFT + 55, Math.min(width - CHART_RIGHT - 65, (startX + endX) / 2)), y - 16, {
         fill: style.stroke,
         "font-size": 11,
         "font-weight": 700,
         "text-anchor": "middle",
       });
     }
+    svg.append(spanGroup);
     hits.push({
       kind: "span",
       priority: 2,
+      id: spanId,
+      element: spanGroup,
       x: (startX + endX) / 2,
       x1: left,
       x2: right,

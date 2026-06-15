@@ -140,6 +140,8 @@ test("streak spans create prioritized tooltip hits", () => {
     const spanHit = chart.hits.find((hit) => hit.kind === "span");
     assert.ok(spanHit);
     assert.equal(spanHit.priority, 2);
+    assert.equal(spanHit.id, "streak-span-0");
+    assert.equal(spanHit.element.attributes.get("data-span-id"), "streak-span-0");
     assert.match(spanHit.text, /历史最高连胜/);
     assert.match(spanHit.text, /连胜 2 局/);
     assert.match(spanHit.text, /右侧被截断/);

@@ -105,6 +105,58 @@ test("fetchAllRecords throttles between successful pages", async () => {
   assert.deepEqual(waits, [1500]);
 });
 
+test("fetchAllRecords adaptive mode starts fast and reports scheduling metrics", async () => {
+  const waits = [];
+  const progress = [];
+  const result = await fetchAllRecords({
+    uuid: "uuid",
+    maxPages: 3,
+    adaptive: true,
+    initialRequestsPerSecond: 10,
+    maxRequestsPerSecond: 12,
+    sleep: async (ms) => waits.push(ms),
+    onProgress: (event) => progress.push(event),
+    post: async (_path, body) => ({
+      code: 200,
+      data: { data: { data: [item(String(body.page))] } },
+    }),
+  });
+
+  assert.equal(result.records.length, 3);
+  assert.deepEqual(waits, [100, 100]);
+  assert.ok(progress.some((event) => event.phase === "delay" && event.requestsPerSecond === 10));
+  assert.ok(progress.some((event) => event.phase === "received" && event.estimatedRemainingMs >= 0));
+});
+
+test("fetchAllRecords adaptive mode backs off and reduces speed after rate limits", async () => {
+  const waits = [];
+  const progress = [];
+  let failures = 0;
+  const result = await fetchAllRecords({
+    uuid: "uuid",
+    maxPages: 1,
+    adaptive: true,
+    initialRequestsPerSecond: 10,
+    maxRequestsPerSecond: 12,
+    rateLimitBaseDelayMs: 5000,
+    sleep: async (ms) => waits.push(ms),
+    onProgress: (event) => progress.push(event),
+    post: async () => {
+      if (failures < 1) {
+        failures += 1;
+        throw new ApiError("请勿频繁请求", 200);
+      }
+      return { code: 200, data: { data: { data: [item("1")] } } };
+    },
+  });
+
+  assert.equal(result.records.length, 1);
+  assert.deepEqual(waits, [5000]);
+  const rateLimit = progress.find((event) => event.phase === "rate-limit");
+  assert.equal(rateLimit.requestsPerSecond, 5);
+  assert.equal(rateLimit.retryCount, 1);
+});
+
 test("fetchAllRecords retries the same page with exponential backoff", async () => {
   const waits = [];
   const pages = [];

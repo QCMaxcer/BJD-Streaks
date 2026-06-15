@@ -6,9 +6,11 @@ import {
   clampZoomMultiplier,
   DEFAULT_VISUALIZATION_RANGE_PRESET,
   getExportChartWidth,
+  getVisualizationFixedLabelLayout,
   getStreakTrackLayout,
   getPreviewChartWidth,
   getVisualizationBaseWidth,
+  resolveVisualizationWheelAction,
 } from "../src/visualization-layout.js";
 
 const model = (days) => ({
@@ -52,6 +54,32 @@ test("export width ignores preview zoom and uses export density", () => {
 test("streak track label has dedicated space above the track line", () => {
   const layout = getStreakTrackLayout();
   assert.ok(layout.minGap >= 20);
+});
+
+test("cumulative streak label sits above the daily win label", () => {
+  const bars = getVisualizationFixedLabelLayout("bars");
+  const line = getVisualizationFixedLabelLayout("line");
+  assert.equal(bars.primaryTop - line.primaryTop, 30);
+  assert.equal(line.trackTop, bars.trackTop);
+  assert.equal(line.secondaryTop, bars.secondaryTop);
+});
+
+test("visualization wheel action distinguishes zoom, horizontal scroll, and default scroll", () => {
+  assert.equal(resolveVisualizationWheelAction({
+    ctrlKey: true,
+    scrollWidth: 900,
+    clientWidth: 900,
+  }), "zoom");
+  assert.equal(resolveVisualizationWheelAction({
+    ctrlKey: false,
+    scrollWidth: 1600,
+    clientWidth: 900,
+  }), "scroll-x");
+  assert.equal(resolveVisualizationWheelAction({
+    ctrlKey: false,
+    scrollWidth: 900,
+    clientWidth: 900,
+  }), "default");
 });
 
 test("tooltip prefers the upper right and falls back near viewport edges", () => {

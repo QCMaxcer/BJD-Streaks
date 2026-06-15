@@ -99,6 +99,69 @@ test("normalizeMatchDetail supports object maps for teams and players", () => {
   assert.deepEqual(detail.players[0].items, [{ label: "TNT", value: 2 }]);
 });
 
+test("normalizeMatchDetail translates known item and upgrade labels", () => {
+  const detail = normalizeMatchDetail({
+    teams: {
+      red: [
+        {
+          player_name: "QC_Max",
+          use_item: {
+            FIRE_CHARGE: 2,
+            OBSIDIAN: 3,
+            ENDER_PEARL: 4,
+            EGG: 5,
+            ENCHANTED_GOLDEN_APPLE: 6,
+            BLAZE_ROD: 7,
+            SNOWBALL: 8,
+            PG_TRAP_FLOW: 9,
+            PG_CHICKEN: 10,
+            PG_AIRDROP: 11,
+            PG_TRAP_COBWEB: 12,
+            PG_BANDIT: 13,
+          },
+          upgrade: {
+            Protection: 1,
+            Sharpness: 2,
+            Defense: 3,
+            Trap: 4,
+            Heal: 5,
+            "Fast Dig": 6,
+            "Iron Forge": 7,
+            "Alarm Trap": 8,
+            "Counter Offensive Trap": 9,
+          },
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(detail.players[0].items, [
+    { label: "火球", value: 2 },
+    { label: "黑曜石", value: 3 },
+    { label: "末影珍珠", value: 4 },
+    { label: "搭桥蛋", value: 5 },
+    { label: "附魔金苹果", value: 6 },
+    { label: "自救平台", value: 7 },
+    { label: "蠹虫蛋", value: 8 },
+    { label: "吃鸡-水陷阱", value: 9 },
+    { label: "吃鸡-急救鸡", value: 10 },
+    { label: "吃鸡-空投", value: 11 },
+    { label: "吃鸡-蜘蛛网陷阱", value: 12 },
+    { label: "吃鸡-绷带", value: 13 },
+  ]);
+  assert.deepEqual(detail.players[0].upgrades, [
+    { label: "保护", value: 1 },
+    { label: "锋利", value: 2 },
+    { label: "挖掘疲劳陷阱", value: 3 },
+    { label: "这是个陷阱", value: 4 },
+    { label: "治愈池", value: 5 },
+    { label: "急迫", value: 6 },
+    { label: "铁锻炉", value: 7 },
+    { label: "报警陷阱", value: 8 },
+    { label: "反击陷阱", value: 9 },
+  ]);
+});
+
 test("normalizeMatchDetail reads a single detail object returned in an array", () => {
   const detail = normalizeMatchDetail([{ game: { map: "海岛", victory: true }, players: [] }]);
   assert.equal(detail.title, "海岛");
@@ -157,6 +220,7 @@ test("normalizeMatchDetail recognizes the live BJD match response shape", () => 
   assert.equal(player.damageTaken, 26.6);
   assert.equal(player.blocksPlaced, 65);
   assert.equal(player.blocksBroken, 4);
+  assert.equal(detail.players.find((entry) => entry.name === "RedPlayer").finalDeaths, 1);
   assert.deepEqual(player.resources, [
     { label: "绿宝石", value: 3 },
     { label: "铁锭", value: 70 },

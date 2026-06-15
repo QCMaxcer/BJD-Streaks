@@ -2,7 +2,7 @@
 // @license MIT
 // @name         布吉岛战绩与连胜统计
 // @namespace    https://user.mcbjd.net/
-// @version      1.0.2
+// @version      1.1.0
 // @description  分类查找布吉岛战绩，并统计当前连胜与历史最高连胜
 // @author       QC_Max
 // @match        https://user.mcbjd.net/*
@@ -313,6 +313,10 @@
     maxPages = 1e3,
     duplicatePageLimit = 2,
     pageDelayMs = 1500,
+    adaptive = false,
+    initialRequestsPerSecond = 0,
+    maxRequestsPerSecond = 12,
+    successRateStep = 25,
     rateLimitBaseDelayMs = 5e3,
     maxRateLimitRetries = 5,
     sleep = wait,
@@ -326,28 +330,52 @@
     let duplicatePages = 0;
     let page = 1;
     let rateLimitRetries = 0;
+    let retryCount = 0;
     let scannedCount = 0;
     let knownRecordHits = 0;
+    let consecutiveSuccesses = 0;
+    let requestsPerSecond = adaptive ? Math.min(
+      Math.max(Number(initialRequestsPerSecond) || (pageDelayMs > 0 ? 1e3 / pageDelayMs : 10), 0.5),
+      Math.max(Number(maxRequestsPerSecond) || 12, 0.5)
+    ) : 0;
+    const maximumRequestsPerSecond = Math.max(
+      requestsPerSecond,
+      Number(maxRequestsPerSecond) || 12
+    );
+    const progressMetrics = () => ({
+      requestsPerSecond: adaptive ? requestsPerSecond : void 0,
+      retryCount,
+      estimatedRemainingMs: adaptive ? Math.ceil(Math.max(0, maxPages - page + 1) / Math.max(0.5, requestsPerSecond) * 1e3) : void 0
+    });
     while (page <= maxPages) {
       if (signal?.aborted) throw new DOMException("\u64CD\u4F5C\u5DF2\u53D6\u6D88", "AbortError");
       if (page > 1 && rateLimitRetries === 0) {
+        const waitMs = adaptive ? Math.ceil(1e3 / requestsPerSecond) : pageDelayMs;
         onProgress({
           phase: "delay",
           page,
           count: records.length,
           scannedCount,
-          waitMs: pageDelayMs
+          waitMs,
+          ...progressMetrics()
         });
-        await sleep(pageDelayMs, signal);
+        if (waitMs > 0) await sleep(waitMs, signal);
       }
-      onProgress({ phase: "request", page, count: records.length, scannedCount });
+      onProgress({ phase: "request", page, count: records.length, scannedCount, ...progressMetrics() });
       let payload;
       try {
         payload = await post("/stats/list", { page, uuid }, { signal });
         rateLimitRetries = 0;
+        consecutiveSuccesses += 1;
+        if (adaptive && consecutiveSuccesses % Math.max(1, Math.floor(successRateStep)) === 0) {
+          requestsPerSecond = Math.min(maximumRequestsPerSecond, requestsPerSecond + 1);
+        }
       } catch (error) {
         if (!isRateLimitError(error) || rateLimitRetries >= maxRateLimitRetries) throw error;
         rateLimitRetries += 1;
+        retryCount += 1;
+        consecutiveSuccesses = 0;
+        if (adaptive) requestsPerSecond = Math.max(0.5, requestsPerSecond / 2);
         const waitMs = Math.min(rateLimitBaseDelayMs * 2 ** (rateLimitRetries - 1), 6e4);
         onProgress({
           phase: "rate-limit",
@@ -356,7 +384,8 @@
           scannedCount,
           waitMs,
           attempt: rateLimitRetries,
-          maxAttempts: maxRateLimitRetries
+          maxAttempts: maxRateLimitRetries,
+          ...progressMetrics()
         });
         await sleep(waitMs, signal);
         continue;
@@ -400,7 +429,8 @@
         added,
         scannedAdded,
         knownRecordHits,
-        pageKnownRecordHits
+        pageKnownRecordHits,
+        ...progressMetrics()
       });
       if (stopWhenKnownRecord && pageKnownRecordHits > 0) {
         return {

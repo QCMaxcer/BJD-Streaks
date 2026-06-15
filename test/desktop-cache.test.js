@@ -71,11 +71,91 @@ test("clearing records preserves player info", async () => {
       uuid: "uuid",
       records: [record("1", "2026-01-01T12:00:00")],
       playerInfo,
+      matchDetails: {
+        "1::2026-01-01T12:00:00": {
+          fetchedAt: "2026-06-14T00:00:00.000Z",
+          raw: { matchId: "1" },
+        },
+      },
     });
 
     const cache = await store.clearRecords("uuid");
     assert.equal(cache.records.length, 0);
     assert.deepEqual(cache.playerInfo, playerInfo);
+    assert.deepEqual(cache.matchDetails, {});
+  });
+});
+
+test("cache store persists and prunes match details by record key", async () => {
+  await withTempStore(async (store) => {
+    const first = record("1", "2026-01-01T12:00:00");
+    const second = record("2", "2026-01-02T12:00:00");
+    await store.write({
+      uuid: "uuid",
+      records: [first, second],
+      matchDetails: {
+        "1::2026-01-01T12:00:00": { fetchedAt: "2026-06-14T00:00:00.000Z", raw: { id: 1 } },
+        "stale::2026-01-03T12:00:00": { fetchedAt: "2026-06-14T00:00:00.000Z", raw: { id: "stale" } },
+      },
+    });
+
+    const cached = await store.read("uuid");
+    assert.deepEqual(Object.keys(cached.matchDetails), ["1::2026-01-01T12:00:00"]);
+
+    const updated = await store.writeMatchDetail({
+      uuid: "uuid",
+      record: second,
+      raw: { id: 2 },
+      fetchedAt: "2026-06-14T00:01:00.000Z",
+    });
+    assert.deepEqual(Object.keys(updated.matchDetails).sort(), [
+      "1::2026-01-01T12:00:00",
+      "2::2026-01-02T12:00:00",
+    ]);
+  });
+});
+
+test("cache store writes multiple match details in one batch", async () => {
+  await withTempStore(async (store) => {
+    const first = record("1", "2026-01-01T12:00:00");
+    const second = record("2", "2026-01-02T12:00:00");
+    await store.write({
+      uuid: "uuid",
+      records: [first, second],
+    });
+
+    const updated = await store.writeMatchDetailsBatch({
+      uuid: "uuid",
+      details: [
+        { record: first, raw: { id: 1 }, fetchedAt: "2026-06-14T00:00:00.000Z" },
+        { record: second, raw: { id: 2 }, fetchedAt: "2026-06-14T00:00:01.000Z" },
+      ],
+    });
+
+    assert.deepEqual(Object.keys(updated.matchDetails).sort(), [
+      "1::2026-01-01T12:00:00",
+      "2::2026-01-02T12:00:00",
+    ]);
+    assert.deepEqual((await store.readMatchDetail("uuid", second)), { id: 2 });
+  });
+});
+
+test("concurrent detail writes do not overwrite each other", async () => {
+  await withTempStore(async (store) => {
+    const first = record("1", "2026-01-01T12:00:00");
+    const second = record("2", "2026-01-02T12:00:00");
+    await store.write({ uuid: "uuid", records: [first, second] });
+
+    await Promise.all([
+      store.writeMatchDetail({ uuid: "uuid", record: first, raw: { id: 1 } }),
+      store.writeMatchDetail({ uuid: "uuid", record: second, raw: { id: 2 } }),
+    ]);
+
+    const cached = await store.read("uuid");
+    assert.deepEqual(Object.keys(cached.matchDetails).sort(), [
+      "1::2026-01-01T12:00:00",
+      "2::2026-01-02T12:00:00",
+    ]);
   });
 });
 

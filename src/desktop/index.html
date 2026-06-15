@@ -14,6 +14,23 @@
         <p class="subtitle">登录后读取当前账号绑定角色，抓取战绩并统计当前连胜与历史最高连胜。</p>
       </div>
       <div class="header-actions">
+        <nav class="external-links" aria-label="项目与社区链接">
+          <a class="external-link" href="https://github.com/QCMaxcer/BJD-Streaks" target="_blank" rel="noreferrer" title="GitHub 项目主页" aria-label="打开 GitHub 项目主页">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2.4a9.8 9.8 0 0 0-3.1 19.1c.5.1.7-.2.7-.5v-1.9c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 0 1.6 1.1 1.6 1.1.9 1.6 2.4 1.1 2.9.9.1-.7.4-1.1.7-1.4-2.3-.3-4.7-1.1-4.7-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.4-1.3.1-2.7 0 0 .9-.3 2.8 1a9.5 9.5 0 0 1 5.1 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.8-4.7 5 .4.3.7 1 .7 2V21c0 .3.2.6.7.5A9.8 9.8 0 0 0 12 2.4Z"/>
+            </svg>
+          </a>
+          <a class="external-link" href="https://space.bilibili.com/399194206" target="_blank" rel="noreferrer" title="Bilibili 主页" aria-label="打开 Bilibili 主页">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8.2 3 2.3 2.7h3L15.8 3l1.3 1.1-1.4 1.6h2.1A3.2 3.2 0 0 1 21 8.9v8.3a3.2 3.2 0 0 1-3.2 3.2H6.2A3.2 3.2 0 0 1 3 17.2V8.9a3.2 3.2 0 0 1 3.2-3.2h2.1L6.9 4.1 8.2 3Zm-2 5a1 1 0 0 0-1 1v8.1a1 1 0 0 0 1 1h11.6a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1H6.2Zm2.3 3.1c.7 0 1.2.7 1.2 1.5s-.5 1.5-1.2 1.5-1.2-.7-1.2-1.5.5-1.5 1.2-1.5Zm7 0c.7 0 1.2.7 1.2 1.5s-.5 1.5-1.2 1.5-1.2-.7-1.2-1.5.5-1.5 1.2-1.5Z"/>
+            </svg>
+          </a>
+          <a class="external-link" href="https://mcbjd.net/" target="_blank" rel="noreferrer" title="布吉岛官网" aria-label="打开布吉岛官网">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 15.8c2.4-1.7 4.5-2.5 6.4-2.4l2.5-6.7 2.3 4 1.4-1.8 3.4 6.9H4Zm-1.5 2.1c2.6-1.1 5.1-1.1 7.6 0 2.5 1.1 5 1.1 7.5 0 1.3-.6 2.6-.8 3.9-.8v2.2c-1.2 0-2.3.3-3.4.8-2.9 1.3-5.8 1.3-8.7 0-2.1-.9-4.2-.9-6.4 0l-.5-2.2Z"/>
+            </svg>
+          </a>
+        </nav>
         <span id="authStatus" class="auth-status">未登录</span>
         <button id="loginButton" class="button primary" type="button">登录布吉岛</button>
         <button id="logoutButton" class="button hidden" type="button">退出登录</button>
@@ -28,7 +45,7 @@
           <input id="cutoffDate" type="date" value="2025-01-01">
         </label>
         <label>
-          <span>分页间隔（秒）</span>
+          <span>初始请求间隔（秒）</span>
           <input id="pageDelay" type="number" min="0.1" max="60" step="0.1" value="0.1">
         </label>
         <label class="checkbox-field">
@@ -89,9 +106,10 @@
           </div>
         </section>
 
-        <div id="tabBar" class="tab-bar" role="tablist" aria-label="功能板块">
+        <div id="tabBar" class="tab-bar sliding-tabs" role="tablist" aria-label="功能板块">
           <button id="streaksTab" class="tab-button active" type="button" data-tab="streaks">连胜统计</button>
           <button id="recordsTab" class="tab-button" type="button" data-tab="records">分类查找</button>
+          <button id="analyticsTab" class="tab-button" type="button" data-tab="analytics">对局数据</button>
         </div>
 
         <div id="streaksPanel" class="tab-panel">
@@ -129,6 +147,50 @@
               <input id="toFilter" type="date" aria-label="结束日期">
             </div>
             <div id="recordList" class="record-list"></div>
+          </section>
+        </div>
+
+        <div id="analyticsPanel" class="tab-panel hidden">
+          <section class="subsection analytics">
+            <div class="section-head">
+              <h2>精确对局数据</h2>
+              <span id="analyticsStatus" class="muted">使用已缓存详情统计</span>
+            </div>
+            <div class="filters analytics-filters">
+              <select id="analyticsMode" aria-label="对局数据精确模式"></select>
+              <input id="analyticsFrom" type="date" aria-label="对局数据开始日期">
+              <input id="analyticsTo" type="date" aria-label="对局数据结束日期">
+              <button id="analyticsPrefetchButton" class="button primary" type="button">补全缺失详情</button>
+              <button id="analyticsCancelButton" class="button danger hidden" type="button">取消补全</button>
+            </div>
+            <div id="analyticsOverview" class="analytics-overview"></div>
+            <div id="analyticsTotals" class="metric-grid analytics-total-grid"></div>
+            <div class="analytics-lists">
+              <section class="analytics-card">
+                <h3>资源收集</h3>
+                <div id="analyticsResources" class="analytics-rank-list"></div>
+              </section>
+              <section class="analytics-card">
+                <h3>使用物品</h3>
+                <div id="analyticsItems" class="analytics-rank-list"></div>
+              </section>
+              <section class="analytics-card">
+                <h3>升级</h3>
+                <div id="analyticsUpgrades" class="analytics-rank-list"></div>
+              </section>
+              <section class="analytics-card">
+                <h3>一起玩过的队友</h3>
+                <div id="analyticsTeammates" class="analytics-rank-list"></div>
+              </section>
+              <section class="analytics-card">
+                <h3>起床战争相关地图</h3>
+                <div id="analyticsBedwarsMaps" class="analytics-rank-list"></div>
+              </section>
+              <section class="analytics-card">
+                <h3>空岛相关地图</h3>
+                <div id="analyticsSkywarsMaps" class="analytics-rank-list"></div>
+              </section>
+            </div>
           </section>
         </div>
       </section>
@@ -183,7 +245,7 @@
             </label>
             <div class="visualization-field">
               <span>图表</span>
-              <div class="segmented-control">
+              <div id="visualizationChartType" class="segmented-control sliding-tabs">
                 <button id="visualizationBarsButton" class="active" type="button">每日胜负</button>
                 <button id="visualizationLineButton" type="button">累计连胜</button>
               </div>

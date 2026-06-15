@@ -64,6 +64,23 @@ export function getStreakTrackLayout() {
   };
 }
 
+export function getVisualizationFixedLabelLayout(chartType = "bars") {
+  return {
+    trackTop: 100,
+    primaryTop: chartType === "line" ? 160 : 190,
+    secondaryTop: 573,
+  };
+}
+
+export function resolveVisualizationWheelAction({
+  ctrlKey = false,
+  scrollWidth = 0,
+  clientWidth = 0,
+} = {}) {
+  if (ctrlKey) return "zoom";
+  return Number(scrollWidth) > Number(clientWidth) + 1 ? "scroll-x" : "default";
+}
+
 export function calculateTooltipPosition({
   clientX,
   clientY,
